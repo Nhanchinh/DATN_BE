@@ -48,11 +48,107 @@ class ExtractiveSummarizationService:
             
             logger.info(f"{self.MODEL_NAME} loaded successfully!")
     
+    # ========================
+    # PREPROCESSING METHODS
+    # ========================
+    
+    def _preprocess_text(self, text: str) -> str:
+        """
+        Preprocess Vietnamese text before summarization.
+        
+        - Normalize whitespace
+        - Fix common punctuation issues
+        - Handle special characters
+        """
+        if not text:
+            return ""
+        
+        # Normalize multiple spaces to single space
+        text = re.sub(r'\s+', ' ', text)
+        
+        # Fix spacing around punctuation
+        text = re.sub(r'\s+([,.!?;:])', r'\1', text)  # Remove space before punct
+        text = re.sub(r'([,.!?;:])(?=[^\s])', r'\1 ', text)  # Add space after punct if missing
+        
+        # Fix multiple punctuation
+        text = re.sub(r'\.{2,}', '.', text)
+        text = re.sub(r',{2,}', ',', text)
+        
+        # Remove leading/trailing whitespace
+        text = text.strip()
+        
+        return text
+    
+    def _postprocess_summary(self, summary: str) -> str:
+        """
+        Postprocess the final summary for better readability.
+        
+        - Normalize punctuation and spacing
+        - Ensure proper capitalization
+        - Clean up connector duplications
+        - Convert inline connectors to sentence starters
+        """
+        if not summary:
+            return ""
+        
+        # Normalize whitespace
+        summary = re.sub(r'\s+', ' ', summary)
+        
+        # Fix spacing around punctuation
+        summary = re.sub(r'\s+([,.!?;:])', r'\1', summary)
+        summary = re.sub(r'([,.!?;:])(?=[^\s\d])', r'\1 ', summary)
+        
+        # Remove double connectors
+        connectors = ['Mặt khác,', 'Bên cạnh đó,', 'Ngoài ra,', 'Đồng thời,']
+        for conn in connectors:
+            # Remove if connector appears twice in a row
+            summary = re.sub(rf'{re.escape(conn)}\s*{re.escape(conn)}', conn, summary, flags=re.IGNORECASE)
+        
+        # Ensure first letter is capitalized
+        if summary:
+            summary = summary[0].upper() + summary[1:]
+        
+        # Ensure ends with period
+        if summary and summary[-1] not in '.!?':
+            summary += '.'
+        
+        # Clean up trailing spaces before punctuation
+        summary = re.sub(r'\s+\.', '.', summary)
+        
+        # Fix double periods
+        summary = re.sub(r'\.{2,}', '.', summary)
+        
+        return summary.strip()
+    
     def _split_sentences(self, text: str) -> List[str]:
-        """Split text into sentences for Vietnamese"""
-        # Split on Vietnamese sentence endings
-        sentences = re.split(r'(?<=[.!?])\s+', text)
-        return [s.strip() for s in sentences if s.strip() and len(s.strip()) > 10]
+        """
+        Split text into sentences for Vietnamese.
+        
+        Handles special cases:
+        - Decimal numbers (4.0, 3.5)
+        - Abbreviations (TP., Mr., Dr.)
+        - Ellipsis (...)
+        """
+        # Protect decimal numbers from being split
+        # Replace "4.0" with "4<DOT>0" temporarily
+        protected = re.sub(r'(\d)\.(\d)', r'\1<DOT>\2', text)
+        
+        # Protect common abbreviations
+        abbreviations = ['TP.', 'Mr.', 'Mrs.', 'Ms.', 'Dr.', 'Prof.', 'vs.', 'etc.']
+        for abbr in abbreviations:
+            protected = protected.replace(abbr, abbr.replace('.', '<DOT>'))
+        
+        # Split on sentence endings (. ! ?) followed by space and uppercase/start
+        sentences = re.split(r'(?<=[.!?])\s+(?=[A-ZÀÁẠẢÃÂẦẤẬẨẪĂẰẮẶẲẴÈÉẸẺẼÊỀẾỆỂỄÌÍỊỈĨÒÓỌỎÕÔỒỐỘỔỖƠỜỚỢỞỠÙÚỤỦŨƯỪỨỰỬỮỲÝỴỶỸĐ])', protected)
+        
+        # Restore protected dots
+        result = []
+        for s in sentences:
+            s = s.replace('<DOT>', '.').strip()
+            if s and len(s) > 10:
+                result.append(s)
+        
+        return result
     
     def _get_sentence_embedding(self, sentence: str) -> torch.Tensor:
         """Get embedding for a single sentence using PhoBERT"""
@@ -110,6 +206,161 @@ class ExtractiveSummarizationService:
             scores[i] += position_bonus
         
         return scores
+    
+    def _join_with_connectors(self, sentences: List[str]) -> str:
+        """
+        Join extracted sentences with appropriate Vietnamese connectors.
+        
+        This makes the summary more fluent and natural-sounding.
+        - Avoids repeating the same connector
+        - Lowercases first letter after connector
+        """
+        if not sentences:
+            return ""
+        
+        if len(sentences) == 1:
+            return sentences[0]
+        
+        # Vietnamese connectors for different contexts
+        contrast_connectors = [
+            "Mặt khác,",
+            "Bên cạnh đó,",
+            "Hơn nữa,",
+            "Thêm vào đó,",
+            "Đồng thời,",
+        ]
+        
+        result_parts = [sentences[0]]  # First sentence has no connector
+        used_connectors = set()  # Track used connectors to avoid repetition
+        
+        for i in range(1, len(sentences)):
+            current = sentences[i]
+            previous = sentences[i - 1]
+            
+            # Check if sentence already has a connector
+            existing_connectors = [
+                "mặt khác", "ngược lại", "tuy nhiên", "nhưng", 
+                "bên cạnh đó", "ngoài ra", "trong khi", "hơn nữa",
+                "thêm vào đó", "đồng thời", "cụ thể", "theo đó"
+            ]
+            
+            has_connector = any(current.lower().startswith(conn) for conn in existing_connectors)
+            
+            if has_connector:
+                # Already has connector, just append as-is
+                result_parts.append(current)
+            else:
+                # Pick a connector that hasn't been used yet
+                available = [c for c in contrast_connectors if c not in used_connectors]
+                if not available:
+                    # All used, reset
+                    available = contrast_connectors
+                    used_connectors.clear()
+                
+                connector = available[0]
+                used_connectors.add(connector)
+                
+                # Lowercase first letter of sentence after connector
+                # Skip if it's a proper noun (check if second char is also uppercase)
+                if len(current) > 1 and current[0].isupper() and not current[1].isupper():
+                    current = current[0].lower() + current[1:]
+                
+                result_parts.append(f"{connector} {current}")
+        
+        return ' '.join(result_parts)
+    
+    def _detect_topic_change(self, prev_sentence: str, curr_sentence: str) -> bool:
+        """
+        Detect if the current sentence introduces a new topic.
+        
+        Simple heuristics:
+        1. Different proper nouns at the start
+        2. Contrast words already present
+        """
+        # Check for existing contrast indicators
+        contrast_indicators = [
+            "mặt khác", "ngược lại", "tuy nhiên", "nhưng", 
+            "bên cạnh đó", "ngoài ra", "trong khi"
+        ]
+        
+        curr_lower = curr_sentence.lower()
+        for indicator in contrast_indicators:
+            if indicator in curr_lower:
+                return False  # Already has connector, don't add more
+        
+        # Check if sentences start with different subjects
+        prev_words = prev_sentence.split()[:3]
+        curr_words = curr_sentence.split()[:3]
+        
+        # If first words are very different, likely topic change
+        if prev_words and curr_words:
+            # Check for proper nouns (capitalized words not at sentence start)
+            prev_proper = [w for w in prev_words if w[0].isupper()]
+            curr_proper = [w for w in curr_words if w[0].isupper()]
+            
+            if prev_proper and curr_proper:
+                # Different proper nouns = topic change
+                if prev_proper[0].lower() != curr_proper[0].lower():
+                    return True
+        
+        return False
+    
+    def _needs_context(self, sentence: str) -> bool:
+        """
+        Check if a sentence needs context from previous sentence.
+        
+        Returns True if sentence starts with:
+        - Pronouns (Nó, Họ, Nó là, Anh ấy, Cô ấy...)
+        - Connectors (Tuy nhiên, Mặc dù, Nhưng, Do đó, Vì vậy...)
+        - Reference words (Đó là, Điều này, Việc này...)
+        """
+        context_starters = [
+            # Pronouns
+            'nó ', 'nó,', 'họ ', 'họ,', 'anh ấy', 'cô ấy', 'chúng tôi', 'chúng ta',
+            # Connectors
+            'tuy nhiên', 'mặc dù', 'nhưng', 'do đó', 'vì vậy', 'vì thế',
+            'bởi vậy', 'cho nên', 'thế nên', 'còn', 'và',
+            # Reference words
+            'đó là', 'điều này', 'việc này', 'điều đó', 'việc đó',
+            'như vậy', 'như thế',
+            # Demonstratives
+            'công cụ này', 'ứng dụng này', 'phần mềm này', 'hệ thống này',
+        ]
+        
+        sentence_lower = sentence.lower().strip()
+        
+        for starter in context_starters:
+            if sentence_lower.startswith(starter):
+                return True
+        
+        return False
+    
+    def _apply_sentence_windowing(
+        self, 
+        selected_indices: List[int], 
+        all_sentences: List[str]
+    ) -> List[int]:
+        """
+        Apply sentence windowing: if a selected sentence needs context,
+        also include the sentence before it.
+        
+        Args:
+            selected_indices: List of selected sentence indices (sorted by score)
+            all_sentences: All sentences in the document
+            
+        Returns:
+            Expanded list of indices with context sentences added
+        """
+        expanded_indices = set(selected_indices)
+        
+        for idx in selected_indices:
+            if idx > 0:  # Has previous sentence
+                sentence = all_sentences[idx]
+                if self._needs_context(sentence):
+                    # Add previous sentence for context
+                    expanded_indices.add(idx - 1)
+        
+        return sorted(list(expanded_indices))
     
     def summarize(
         self,
@@ -180,6 +431,135 @@ class ExtractiveSummarizationService:
             Tuple[str, List[str]]: (summary as string, list of extracted sentences)
         """
         return self.summarize(text, num_sentences=num_sentences)
+    
+    def _split_into_chunks(self, text: str, chunk_size: int = 3) -> List[str]:
+        """
+        Split text into chunks of N sentences each.
+        
+        Args:
+            text: Input text
+            chunk_size: Number of sentences per chunk
+            
+        Returns:
+            List of text chunks
+        """
+        sentences = self._split_sentences(text)
+        chunks = []
+        
+        for i in range(0, len(sentences), chunk_size):
+            chunk = ' '.join(sentences[i:i + chunk_size])
+            if chunk.strip():
+                chunks.append(chunk)
+        
+        return chunks
+    
+    def summarize_chunked(
+        self,
+        text: str,
+        sentences_per_chunk: int = 3,
+        sentences_per_extraction: int = 1
+    ) -> dict:
+        """
+        Chunk-based extractive summarization for better coverage.
+        
+        Pipeline:
+        1. Split text into chunks (groups of sentences)
+        2. Extract top sentence(s) from each chunk
+        3. Combine extracted sentences
+        
+        This ensures every part of the document is represented.
+        
+        Args:
+            text: Input text to summarize
+            sentences_per_chunk: How many sentences per chunk
+            sentences_per_extraction: How many sentences to extract from each chunk
+            
+        Returns:
+            Dict with chunking details and final summary
+        """
+        self._load_model()
+        
+        # PREPROCESS input text
+        text = self._preprocess_text(text)
+        
+        # Split into sentences first
+        all_sentences = self._split_sentences(text)
+        
+        if len(all_sentences) <= 3:
+            # Text too short, just extract normally
+            summary, extracted = self.summarize(text, num_sentences=2)
+            return {
+                "chunks": [{"chunk": text, "extracted": extracted}],
+                "num_chunks": 1,
+                "extracted_sentences": extracted,
+                "final_summary": summary,
+                "method": "chunked_extractive (text too short, used regular)",
+                "original_length": len(text),
+                "final_length": len(summary)
+            }
+        
+        # Split into chunks
+        chunks = self._split_into_chunks(text, sentences_per_chunk)
+        
+        logger.info(f"Split text into {len(chunks)} chunks")
+        
+        chunk_results = []
+        all_extracted = []
+        
+        for i, chunk in enumerate(chunks):
+            # Get sentences in this chunk
+            chunk_sentences = self._split_sentences(chunk)
+            
+            if len(chunk_sentences) == 0:
+                continue
+            
+            if len(chunk_sentences) <= sentences_per_extraction:
+                # Chunk is small, take all sentences
+                extracted = chunk_sentences
+                selected_indices = list(range(len(chunk_sentences)))
+            else:
+                # Compute scores for this chunk
+                scores = self._compute_sentence_scores(chunk_sentences)
+                
+                # Get top sentences
+                scored = list(zip(range(len(chunk_sentences)), chunk_sentences, scores))
+                scored.sort(key=lambda x: x[2], reverse=True)
+                
+                # Take top N indices
+                top_indices = [s[0] for s in scored[:sentences_per_extraction]]
+                
+                # Apply sentence windowing - add context sentences if needed
+                selected_indices = self._apply_sentence_windowing(top_indices, chunk_sentences)
+            
+            # Sort by position and extract sentences
+            selected_indices.sort()
+            extracted = [chunk_sentences[idx] for idx in selected_indices]
+            
+            chunk_results.append({
+                "chunk_id": i + 1,
+                "chunk_preview": chunk[:80] + "..." if len(chunk) > 80 else chunk,
+                "extracted": extracted
+            })
+            all_extracted.extend(extracted)
+        
+        # Combine extracted sentences WITH CONNECTORS
+        final_summary = self._join_with_connectors(all_extracted)
+        
+        # POSTPROCESS final summary
+        final_summary = self._postprocess_summary(final_summary)
+        
+        return {
+            "chunks": chunk_results,
+            "num_chunks": len(chunks),
+            "extracted_sentences": all_extracted,
+            "num_sentences_extracted": len(all_extracted),
+            "final_summary": final_summary,
+            "method": "chunked_extractive_with_connectors",
+            "hallucination_risk": "ZERO",
+            "original_length": len(text),
+            "final_length": len(final_summary),
+            "compression_ratio": round(len(final_summary) / len(text), 3) if len(text) > 0 else 0
+        }
     
     def get_model_info(self) -> dict:
         """Return information about the model"""

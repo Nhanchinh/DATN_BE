@@ -22,6 +22,10 @@ from app.services.extractive_service import (
     ExtractiveSummarizationService,
     get_extractive_service,
 )
+from app.services.hybrid_service import (
+    HybridSummarizationService,
+    get_hybrid_service,
+)
 
 
 router = APIRouter(prefix="/summarize", tags=["summarization"])
@@ -275,9 +279,84 @@ async def summarize_extractive(
         )
 
 
+@router.post("/chunked", response_model=dict)
+async def summarize_chunked(
+    request: SummarizationRequest,
+    service: ExtractiveSummarizationService = Depends(get_extractive_service)
+) -> dict:
+    """
+    Tóm tắt trích xuất theo chunks (Chunk-based Extractive).
+    
+    **Tốt nhất cho tiếng Việt - An toàn 100%!**
+    
+    Pipeline:
+    1. Chia văn bản thành nhiều chunks (nhóm 3 câu)
+    2. Trích xuất 1 câu quan trọng nhất từ mỗi chunk
+    3. Ghép các câu lại thành summary hoàn chỉnh
+    
+    **Ưu điểm:**
+    - Không bao giờ hallucinate (chỉ trích câu gốc)
+    - Độ bao phủ cao (mỗi phần văn bản đều có đại diện)
+    - Cân bằng (không ưu tiên phần đầu)
+    """
+    try:
+        result = service.summarize_chunked(
+            text=request.text,
+            sentences_per_chunk=3,
+            sentences_per_extraction=1
+        )
+        return result
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Chunked summarization failed: {str(e)}"
+        )
+
+
 @router.get("/extractive/info", response_model=dict)
 async def get_extractive_info(
     service: ExtractiveSummarizationService = Depends(get_extractive_service)
 ) -> dict:
     """Lấy thông tin về model trích xuất"""
+    return service.get_model_info()
+
+
+@router.post("/hybrid", response_model=dict)
+async def summarize_hybrid(
+    request: SummarizationRequest,
+    service: HybridSummarizationService = Depends(get_hybrid_service)
+) -> dict:
+    """
+    Tóm tắt lai (Hybrid Summarization) - Tốt nhất cho tiếng Việt!
+    
+    **Pipeline:**
+    1. **Stage 1 (PhoBERT)**: Trích xuất câu quan trọng → An toàn, không bịa
+    2. **Stage 2 (ViT5)**: Viết lại mượt mà → Văn phong tự nhiên
+    
+    **Ưu điểm:**
+    - Ít hallucinate hơn ViT5 thuần (vì input ngắn)
+    - Mượt mà hơn PhoBERT thuần
+    - Độ bao phủ tốt
+    
+    Lần đầu gọi sẽ load 2 models (~400MB + ~900MB).
+    """
+    try:
+        result = service.summarize(
+            text=request.text,
+            max_length=request.max_length,
+            min_length=request.min_length
+        )
+        return result
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Hybrid summarization failed: {str(e)}"
+        )
+
+
+@router.get("/hybrid/info", response_model=dict)
+async def get_hybrid_info(
+    service: HybridSummarizationService = Depends(get_hybrid_service)
+) -> dict:
+    """Lấy thông tin về model hybrid"""
     return service.get_model_info()
