@@ -203,6 +203,99 @@ class SummarizationService:
             'final_summary_length': len(final_summary),
         }
     
+    def _summarize_single_topic(
+        self,
+        text: str,
+        max_length: int = 80,
+        min_length: int = 10
+    ) -> str:
+        """Summarize a single topic/section with aggressive compression"""
+        self._load_model()
+        
+        inputs = self._tokenizer(
+            text,
+            return_tensors="pt",
+            max_length=512,
+            truncation=True
+        ).to(self._device)
+        
+        with torch.no_grad():
+            outputs = self._model.generate(
+                **inputs,
+                max_length=max_length,
+                min_length=min_length,
+                num_beams=4,
+                length_penalty=3.0,  # Increased from 1.5 to prefer shorter outputs
+                early_stopping=True,
+                no_repeat_ngram_size=3,
+            )
+        
+        return self._tokenizer.decode(outputs[0], skip_special_tokens=True)
+    
+    def summarize_balanced(
+        self,
+        text: str,
+        max_length: int = 200,
+        min_length: int = 50
+    ) -> Tuple[str, str, List[Dict]]:
+        """
+        Topic-balanced summarization:
+        1. Split text into topics
+        2. Summarize each topic with equal quota
+        3. Combine into balanced final summary
+        
+        This ensures all topics get fair coverage, solving the problem
+        where BART focuses too much on early content.
+        
+        Returns:
+            Tuple[str, str, List[Dict]]: (raw_combined, final_summary, topic_summaries)
+        """
+        # PRE-PROCESSING
+        cleaned_text = self._text_processor.preprocess(text)
+        topics = self._text_processor.extract_topics(text)
+        entities = self._text_processor.extract_entities(text)
+        
+        logger.info(f"Found {len(topics)} topics: {[t['name'] for t in topics]}")
+        
+        if len(topics) <= 1:
+            # If only 1 topic, use regular summarization
+            raw, processed = self.summarize(text, max_length, min_length)
+            return raw, processed, []
+        
+        # Calculate per-topic length quota
+        # Give each topic roughly equal space, allowing shorter summaries
+        per_topic_max = max(30, max_length // len(topics))  # Reduced from 50
+        per_topic_min = max(10, min_length // len(topics))  # Reduced from 15
+        
+        topic_summaries = []
+        
+        for topic in topics:
+            if not topic['content'] or len(topic['content'].strip()) < 30:
+                continue
+            
+            # Summarize this topic
+            topic_summary = self._summarize_single_topic(
+                topic['content'],
+                max_length=per_topic_max,
+                min_length=per_topic_min
+            )
+            
+            topic_summaries.append({
+                'name': topic['name'],
+                'original': topic['content'][:100] + '...',
+                'summary': topic_summary
+            })
+            
+            logger.info(f"Topic '{topic['name']}' summarized: {len(topic_summary)} chars")
+        
+        # Combine topic summaries
+        raw_combined = ' '.join([ts['summary'] for ts in topic_summaries])
+        
+        # POST-PROCESSING
+        final_summary = self._text_processor.postprocess(raw_combined, entities)
+        
+        return raw_combined, final_summary, topic_summaries
+    
     def calculate_improvement_ratio(self, original: str, refined: str) -> float:
         """Calculate how much the text changed after refinement"""
         if not original or not refined:

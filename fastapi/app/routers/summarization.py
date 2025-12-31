@@ -53,6 +53,42 @@ async def summarize_text(
         )
 
 
+@router.post("/balanced", response_model=dict)
+async def summarize_balanced(
+    request: SummarizationRequest,
+    service: SummarizationService = Depends(get_summarization_service)
+) -> dict:
+    """
+    Tóm tắt cân bằng theo topic (Topic-Balanced Summarization):
+    - Chia văn bản thành các topic riêng biệt
+    - Tóm tắt mỗi topic với quota độ dài bằng nhau
+    - Kết hợp thành bản tóm tắt cuối cùng
+    
+    Đảm bảo mỗi topic được đề cập đầy đủ - giải quyết vấn đề
+    BART ưu tiên nội dung ở đầu văn bản.
+    """
+    try:
+        raw_combined, final_summary, topic_summaries = service.summarize_balanced(
+            text=request.text,
+            max_length=request.max_length,
+            min_length=request.min_length
+        )
+        
+        return {
+            "raw_summary": raw_combined,
+            "final_summary": final_summary,
+            "original_length": len(request.text),
+            "final_summary_length": len(final_summary),
+            "topics_found": len(topic_summaries),
+            "topic_summaries": topic_summaries
+        }
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Balanced summarization failed: {str(e)}"
+        )
+
+
 @router.post("/detailed", response_model=dict)
 async def summarize_with_details(
     request: SummarizationRequest,

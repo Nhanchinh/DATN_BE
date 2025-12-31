@@ -86,43 +86,84 @@ class TextProcessor:
     
     def extract_topics(self, text: str) -> List[Dict[str, str]]:
         """
-        Extract distinct topics/sections from text.
+        Extract distinct MAJOR topics/sections from text.
+        
+        A new topic is detected when:
+        1. A multi-word proper noun appears at sentence start (e.g., "Android Studio", "Visual Studio Code")
+        2. A transition phrase is used (e.g., "On the other hand", "In contrast")
+        3. A definition pattern "X is/are ..." introduces a new subject
         
         Returns list of dicts with:
         - name: Topic name (main entity)
         - content: Text content for that topic
         """
-        # Split by common topic transitions
-        transition_patterns = [
-            r'(?:On the other hand|In contrast|However|Additionally|Furthermore|Meanwhile)',
-            r'(?:\.\s+)([A-Z][a-z]+(?:\s+[A-Z][a-z]+)+)(?:\s+is|\s+are|\s+has|\s+was)',
+        sentences = re.split(r'(?<=[.!?])\s+', text)
+        
+        # Transition phrases that indicate topic change
+        transition_phrases = [
+            'on the other hand', 'in contrast', 'however', 'meanwhile',
+            'alternatively', 'conversely', 'whereas', 'while'
         ]
         
-        sentences = re.split(r'(?<=[.!?])\s+', text)
+        # Pattern for multi-word product/company names at sentence start
+        # Must be 2+ words with capitals: "Android Studio", "Visual Studio Code"
+        multiword_entity_pattern = r'^([A-Z][a-z]+(?:\s+[A-Z][a-z]+)+)'
         
         topics = []
         current_topic = {'name': '', 'content': '', 'entities': []}
         
         for sentence in sentences:
-            entities = self.extract_entities(sentence)
+            sentence_lower = sentence.lower().strip()
             
-            # Check if this sentence introduces a new topic (has new major entity)
-            if entities and (not current_topic['entities'] or 
-                           entities[0].lower() not in [e.lower() for e in current_topic['entities'][:2]]):
+            # Check for transition phrases
+            has_transition = any(phrase in sentence_lower for phrase in transition_phrases)
+            
+            # Check for multi-word entity at start of sentence
+            multiword_match = re.match(multiword_entity_pattern, sentence.strip())
+            
+            # Check if sentence is a definition: "X is/are the/a ..."
+            is_definition = bool(re.match(r'^[A-Z][a-z]+.*?\s+(is|are)\s+(the|a|an)\s+', sentence.strip()))
+            
+            # Decide if this starts a new topic
+            should_start_new_topic = False
+            new_topic_name = ''
+            
+            if multiword_match:
+                candidate_name = multiword_match.group(1)
+                # Only start new topic if this is different from current topic
+                if candidate_name.lower() != current_topic['name'].lower():
+                    should_start_new_topic = True
+                    new_topic_name = candidate_name
+            
+            if has_transition and not should_start_new_topic:
+                # Look for entity after transition
+                entities = self.extract_entities(sentence)
+                if entities and entities[0].lower() != current_topic['name'].lower():
+                    should_start_new_topic = True
+                    new_topic_name = entities[0] if len(entities[0].split()) > 1 else ''
+            
+            if should_start_new_topic and new_topic_name:
                 # Save current topic if it has content
                 if current_topic['content']:
                     topics.append(current_topic)
                 
                 # Start new topic
                 current_topic = {
-                    'name': entities[0] if entities else '',
+                    'name': new_topic_name,
                     'content': sentence,
-                    'entities': entities
+                    'entities': self.extract_entities(sentence)
                 }
             else:
                 # Add to current topic
-                current_topic['content'] += ' ' + sentence
-                current_topic['entities'].extend(entities)
+                if current_topic['content']:
+                    current_topic['content'] += ' ' + sentence
+                else:
+                    # First sentence - try to find a good topic name
+                    entities = self.extract_entities(sentence)
+                    multiword = [e for e in entities if len(e.split()) > 1]
+                    current_topic['name'] = multiword[0] if multiword else (entities[0] if entities else '')
+                    current_topic['content'] = sentence
+                current_topic['entities'].extend(self.extract_entities(sentence))
         
         # Don't forget the last topic
         if current_topic['content']:
