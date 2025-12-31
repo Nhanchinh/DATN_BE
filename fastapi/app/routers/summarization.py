@@ -313,6 +313,41 @@ async def summarize_chunked(
         )
 
 
+@router.post("/smart", response_model=dict)
+async def summarize_smart(
+    request: SummarizationRequest,
+    service: ExtractiveSummarizationService = Depends(get_extractive_service)
+) -> dict:
+    """
+    Tóm tắt thông minh tự động (Smart Extractive) - **RECOMMENDED!**
+    
+    **Tự động tính số câu trích xuất dựa trên tỷ lệ 30%.**
+    
+    Ví dụ:
+    - Văn bản 10 câu → Trích xuất 3 câu (30%)
+    - Văn bản 20 câu → Trích xuất 6 câu (30%)
+    
+    **Ưu điểm:**
+    - Không cần config thủ công
+    - Độ bao phủ luôn cân đối
+    - Không hallucinate (ZERO risk)
+    - Có Sentence Windowing (giữ context)
+    """
+    try:
+        result = service.summarize_by_ratio(
+            text=request.text,
+            ratio=0.3,  # 30% - tỷ lệ vàng
+            min_sentences=1,
+            max_sentences=10
+        )
+        return result
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Smart summarization failed: {str(e)}"
+        )
+
+
 @router.get("/extractive/info", response_model=dict)
 async def get_extractive_info(
     service: ExtractiveSummarizationService = Depends(get_extractive_service)

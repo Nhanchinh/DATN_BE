@@ -200,12 +200,82 @@ class ExtractiveSummarizationService:
             ).item()
             scores.append(similarity)
         
-        # Add position bias (first sentences usually more important)
+        # Reduce position bias significantly (was 0.1, now 0.02)
+        # This prevents first sentences from dominating
         for i in range(len(scores)):
-            position_bonus = 0.1 * (1 - i / len(scores))
+            position_bonus = 0.02 * (1 - i / len(scores))
             scores[i] += position_bonus
         
         return scores
+    
+    def _select_with_mmr(
+        self,
+        sentences: List[str],
+        scores: List[float],
+        k: int,
+        lambda_param: float = 0.5
+    ) -> List[int]:
+        """
+        Select sentences using Maximum Marginal Relevance (MMR).
+        
+        MMR balances relevance (high score) with diversity (different from 
+        already selected sentences). This prevents all selected sentences
+        from being similar to each other.
+        
+        Args:
+            sentences: All sentences
+            scores: Importance scores for each sentence
+            k: Number of sentences to select
+            lambda_param: Balance between relevance (1.0) and diversity (0.0)
+            
+        Returns:
+            List of selected sentence indices
+        """
+        if len(sentences) <= k:
+            return list(range(len(sentences)))
+        
+        self._load_model()
+        
+        # Get embeddings for all sentences
+        embeddings = [self._get_sentence_embedding(s) for s in sentences]
+        
+        selected = []
+        remaining = list(range(len(sentences)))
+        
+        # First, select the highest scoring sentence
+        best_idx = max(remaining, key=lambda i: scores[i])
+        selected.append(best_idx)
+        remaining.remove(best_idx)
+        
+        # Then iteratively select sentences using MMR
+        while len(selected) < k and remaining:
+            best_mmr_score = -float('inf')
+            best_candidate = remaining[0]
+            
+            for idx in remaining:
+                # Relevance: original score
+                relevance = scores[idx]
+                
+                # Diversity: minimum similarity to any selected sentence
+                max_sim_to_selected = 0
+                for sel_idx in selected:
+                    sim = torch.nn.functional.cosine_similarity(
+                        embeddings[idx].unsqueeze(0),
+                        embeddings[sel_idx].unsqueeze(0)
+                    ).item()
+                    max_sim_to_selected = max(max_sim_to_selected, sim)
+                
+                # MMR score = lambda * relevance - (1-lambda) * similarity_to_selected
+                mmr_score = lambda_param * relevance - (1 - lambda_param) * max_sim_to_selected
+                
+                if mmr_score > best_mmr_score:
+                    best_mmr_score = mmr_score
+                    best_candidate = idx
+            
+            selected.append(best_candidate)
+            remaining.remove(best_candidate)
+        
+        return selected
     
     def _join_with_connectors(self, sentences: List[str]) -> str:
         """
@@ -221,11 +291,10 @@ class ExtractiveSummarizationService:
         if len(sentences) == 1:
             return sentences[0]
         
-        # Vietnamese connectors for different contexts
-        contrast_connectors = [
-            "Mặt khác,",
+        # Use SAFE connectors only - works for any context
+        # Avoid "Mặt khác", "Tuy nhiên" as they imply contrast which may be wrong
+        safe_connectors = [
             "Bên cạnh đó,",
-            "Hơn nữa,",
             "Thêm vào đó,",
             "Đồng thời,",
         ]
@@ -251,10 +320,10 @@ class ExtractiveSummarizationService:
                 result_parts.append(current)
             else:
                 # Pick a connector that hasn't been used yet
-                available = [c for c in contrast_connectors if c not in used_connectors]
+                available = [c for c in safe_connectors if c not in used_connectors]
                 if not available:
                     # All used, reset
-                    available = contrast_connectors
+                    available = safe_connectors
                     used_connectors.clear()
                 
                 connector = available[0]
@@ -431,6 +500,93 @@ class ExtractiveSummarizationService:
             Tuple[str, List[str]]: (summary as string, list of extracted sentences)
         """
         return self.summarize(text, num_sentences=num_sentences)
+    
+    def summarize_by_ratio(
+        self,
+        text: str,
+        ratio: float = 0.3,
+        min_sentences: int = 1,
+        max_sentences: int = 10
+    ) -> dict:
+        """
+        Extractive summarization with automatic sentence count based on ratio.
+        
+        This is the recommended method for Vietnamese text summarization.
+        It dynamically calculates how many sentences to extract based on
+        the total number of sentences in the input.
+        
+        Args:
+            text: Input text to summarize
+            ratio: Target compression ratio (default 0.3 = 30% of original)
+            min_sentences: Minimum sentences to extract (default 1)
+            max_sentences: Maximum sentences to extract (default 10)
+            
+        Returns:
+            Dict with summary and metadata
+        """
+        self._load_model()
+        
+        # Preprocess
+        text = self._preprocess_text(text)
+        
+        # Split into sentences
+        all_sentences = self._split_sentences(text)
+        total_sentences = len(all_sentences)
+        
+        if total_sentences == 0:
+            return {
+                "summary": "",
+                "extracted_sentences": [],
+                "num_sentences_extracted": 0,
+                "total_sentences": 0,
+                "ratio_applied": ratio,
+                "method": "extractive_by_ratio",
+                "hallucination_risk": "ZERO"
+            }
+        
+        # Calculate number of sentences to extract based on ratio
+        import math
+        calculated_k = math.ceil(total_sentences * ratio)
+        
+        # Apply min/max bounds
+        num_to_extract = max(min_sentences, min(calculated_k, max_sentences))
+        
+        # Also cap at total sentences
+        num_to_extract = min(num_to_extract, total_sentences)
+        
+        # Compute importance scores
+        scores = self._compute_sentence_scores(all_sentences)
+        
+        # Use MMR to select diverse sentences (not just top-k)
+        # This prevents position bias and ensures coverage of entire document
+        selected_indices = self._select_with_mmr(
+            sentences=all_sentences,
+            scores=scores,
+            k=num_to_extract,
+            lambda_param=0.5  # Balance between relevance and diversity
+        )
+        
+        # Sort by position and extract (no windowing to avoid exceeding k)
+        selected_indices.sort()
+        extracted = [all_sentences[idx] for idx in selected_indices]
+        
+        # Join with connectors and postprocess
+        summary = self._join_with_connectors(extracted)
+        summary = self._postprocess_summary(summary)
+        
+        return {
+            "summary": summary,
+            "extracted_sentences": extracted,
+            "num_sentences_extracted": len(extracted),
+            "total_sentences": total_sentences,
+            "calculated_k": calculated_k,
+            "ratio_applied": ratio,
+            "method": "extractive_by_ratio",
+            "hallucination_risk": "ZERO",
+            "original_length": len(text),
+            "summary_length": len(summary),
+            "compression_ratio": round(len(summary) / len(text), 3) if len(text) > 0 else 0
+        }
     
     def _split_into_chunks(self, text: str, chunk_size: int = 3) -> List[str]:
         """
