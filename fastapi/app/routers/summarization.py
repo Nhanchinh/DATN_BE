@@ -1,5 +1,5 @@
 """
-Summarization Router - Two-stage Summarization API Endpoints
+Summarization Router - BART-large-cnn with Pre/Post Processing
 """
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -25,11 +25,12 @@ async def summarize_text(
     service: SummarizationService = Depends(get_summarization_service)
 ) -> SummarizationResponse:
     """
-    Tóm tắt văn bản với pipeline hai giai đoạn:
-    - Stage 1 (T5-small): Tạo bản tóm tắt thô
-    - Stage 2 (BART-base): Tinh chỉnh và hoàn thiện
+    Tóm tắt văn bản với BART-large-cnn + pre/post processing:
+    - Pre-processing: Clean text, extract entities
+    - Summarization: BART-large-cnn
+    - Post-processing: Remove redundancy
     
-    Lần đầu gọi API sẽ mất thời gian để load models.
+    Lần đầu gọi API sẽ mất thời gian để load model (~1.6GB).
     """
     try:
         raw_summary, final_summary = service.summarize(
@@ -52,14 +53,44 @@ async def summarize_text(
         )
 
 
+@router.post("/detailed", response_model=dict)
+async def summarize_with_details(
+    request: SummarizationRequest,
+    service: SummarizationService = Depends(get_summarization_service)
+) -> dict:
+    """
+    Tóm tắt văn bản với phân tích chi tiết:
+    - raw_summary: Bản tóm tắt gốc từ BART
+    - final_summary: Bản tóm tắt sau post-processing
+    - entities: Danh sách entities quan trọng
+    - entity_coverage: Entities nào có mặt trong summary
+    - topics: Các topic được xác định
+    - topic_balance: Độ bao phủ mỗi topic
+    
+    Endpoint này hữu ích để debug và đánh giá chất lượng.
+    """
+    try:
+        result = service.summarize_with_details(
+            text=request.text,
+            max_length=request.max_length,
+            min_length=request.min_length
+        )
+        return result
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Summarization failed: {str(e)}"
+        )
+
+
 @router.post("/raw", response_model=dict)
 async def summarize_raw_only(
     request: SummarizationRequest,
     service: SummarizationService = Depends(get_summarization_service)
 ) -> dict:
     """
-    Chỉ sử dụng Stage 1 (T5-small) để tạo bản tóm tắt thô.
-    Nhanh hơn full pipeline.
+    Chỉ tạo bản tóm tắt thô (không có post-processing).
+    Dùng để so sánh với bản đã post-process.
     """
     try:
         raw_summary = service.generate_raw_summary(
@@ -70,8 +101,8 @@ async def summarize_raw_only(
         
         return {
             "summary": raw_summary,
-            "model": "T5-small",
-            "stage": 1,
+            "model": "facebook/bart-large-cnn",
+            "post_processed": False,
             "original_length": len(request.text),
             "summary_length": len(raw_summary)
         }
@@ -88,8 +119,8 @@ async def refine_text(
     service: SummarizationService = Depends(get_summarization_service)
 ) -> RefineResponse:
     """
-    Chỉ sử dụng Stage 2 (BART-base) để tinh chỉnh văn bản đã có.
-    Dùng khi bạn đã có bản tóm tắt thô và muốn polish.
+    Chỉ chạy post-processing trên văn bản đã có.
+    Dùng để test hiệu quả của post-processing.
     """
     try:
         refined_text = service.refine_summary(
@@ -112,3 +143,4 @@ async def refine_text(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Refinement failed: {str(e)}"
         )
+

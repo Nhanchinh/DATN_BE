@@ -1,28 +1,34 @@
 """
-Summarization Service - Using BART-Large-CNN (Summarization Specialist)
+Summarization Service - Using BART-Large-CNN with Pre/Post Processing
 
-This model is specifically fine-tuned on 300K CNN/DailyMail news articles
-for abstractive summarization. It produces high-quality summaries that:
-- Preserve proper nouns and key entities
-- Generate fluent, natural language
-- Capture the main ideas accurately
+Pipeline:
+1. PRE-PROCESSING: Clean text, extract entities
+2. BART-LARGE-CNN: Generate summary
+3. POST-PROCESSING: Remove redundancy, validate coverage
 """
 
 import logging
-from typing import Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 import torch
 from transformers import BartForConditionalGeneration, BartTokenizer
+
+from app.utils.text_processor import TextProcessor, get_text_processor
 
 logger = logging.getLogger(__name__)
 
 
 class SummarizationService:
     """
-    Summarization service using facebook/bart-large-cnn
+    Summarization service using facebook/bart-large-cnn with
+    preprocessing and postprocessing for improved quality.
     
-    This is a single-model approach using a specialist model that's
-    already optimized for summarization tasks.
+    Pipeline:
+    1. Preprocess text (clean, normalize)
+    2. Extract entities for coverage checking
+    3. Generate summary with BART
+    4. Postprocess (remove redundancy)
+    5. Validate entity coverage
     """
     
     MODEL_NAME = "facebook/bart-large-cnn"
@@ -31,6 +37,7 @@ class SummarizationService:
         self._model: Optional[BartForConditionalGeneration] = None
         self._tokenizer: Optional[BartTokenizer] = None
         self._device = "cuda" if torch.cuda.is_available() else "cpu"
+        self._text_processor: TextProcessor = get_text_processor()
         
         logger.info(f"SummarizationService initialized. Device: {self._device}")
     
@@ -54,16 +61,18 @@ class SummarizationService:
         Generate summary using BART-large-cnn
         
         This is "Stage 1" - the initial summarization.
-        Since BART-large-cnn is already excellent at summarization,
-        this produces high-quality output directly.
+        Includes preprocessing for better input quality.
         """
         self._load_model()
         
+        # PRE-PROCESSING: Clean and normalize text
+        cleaned_text = self._text_processor.preprocess(text)
+        
         # BART-large-cnn doesn't need special prompts - just the text
         inputs = self._tokenizer(
-            text,
+            cleaned_text,
             return_tensors="pt",
-            max_length=1024,  # BART can handle longer inputs
+            max_length=1024,
             truncation=True
         ).to(self._device)
         
@@ -88,9 +97,7 @@ class SummarizationService:
     ) -> str:
         """
         Stage 2: Further refine/condense the summary
-        
-        For BART-large-cnn, we can run it again on the summary
-        to potentially make it more concise or fluent.
+        Includes postprocessing for redundancy removal.
         """
         self._load_model()
         
@@ -122,22 +129,79 @@ class SummarizationService:
         min_length: int = 30
     ) -> Tuple[str, str]:
         """
-        Full summarization pipeline:
-        1. Generate initial summary from original text
-        2. Optionally refine (for two-stage comparison)
+        Full summarization pipeline with pre/post processing:
+        
+        1. PRE-PROCESS: Clean and normalize input text
+        2. EXTRACT: Get entities from original for coverage check
+        3. SUMMARIZE: Generate summary with BART
+        4. POST-PROCESS: Remove redundancy and fix issues
+        5. VALIDATE: Check entity coverage
         
         Returns:
-            Tuple[str, str]: (raw_summary, final_summary)
+            Tuple[str, str]: (raw_summary, processed_summary)
         """
+        # PRE-PROCESSING
+        cleaned_text = self._text_processor.preprocess(text)
+        original_entities = self._text_processor.extract_entities(text)
+        
+        logger.info(f"Extracted entities: {original_entities[:5]}...")
+        
         # Stage 1: Initial summarization
-        raw_summary = self.generate_raw_summary(text, max_length, min_length)
+        raw_summary = self.generate_raw_summary(cleaned_text, max_length, min_length)
         
-        # Stage 2: For comparison, we'll keep raw and refined the same
-        # since BART-large-cnn already produces excellent summaries
-        # Running it twice on short text doesn't improve much
-        final_summary = raw_summary
+        # POST-PROCESSING: Remove redundancy
+        processed_summary = self._text_processor.postprocess(raw_summary, original_entities)
         
-        return raw_summary, final_summary
+        # Log coverage info
+        coverage = self._text_processor.check_entity_coverage(processed_summary, text)
+        covered = sum(1 for v in coverage.values() if v)
+        logger.info(f"Entity coverage: {covered}/{len(coverage)}")
+        
+        return raw_summary, processed_summary
+    
+    def summarize_with_details(
+        self,
+        text: str,
+        max_length: int = 150,
+        min_length: int = 30
+    ) -> Dict:
+        """
+        Full summarization with detailed analysis.
+        
+        Returns dict with:
+        - raw_summary: Before postprocessing
+        - final_summary: After postprocessing
+        - entities: Extracted entities
+        - entity_coverage: Which entities appear in summary
+        - topics: Identified topics
+        - topic_balance: Coverage per topic
+        """
+        # PRE-PROCESSING
+        cleaned_text = self._text_processor.preprocess(text)
+        entities = self._text_processor.extract_entities(text)
+        topics = self._text_processor.extract_topics(text)
+        
+        # SUMMARIZATION
+        raw_summary = self.generate_raw_summary(cleaned_text, max_length, min_length)
+        
+        # POST-PROCESSING
+        final_summary = self._text_processor.postprocess(raw_summary, entities)
+        
+        # ANALYSIS
+        entity_coverage = self._text_processor.check_entity_coverage(final_summary, text)
+        topic_balance = self._text_processor.calculate_topic_balance(final_summary, topics)
+        
+        return {
+            'raw_summary': raw_summary,
+            'final_summary': final_summary,
+            'entities': entities[:10],
+            'entity_coverage': entity_coverage,
+            'topics': [t['name'] for t in topics],
+            'topic_balance': topic_balance,
+            'original_length': len(text),
+            'raw_summary_length': len(raw_summary),
+            'final_summary_length': len(final_summary),
+        }
     
     def calculate_improvement_ratio(self, original: str, refined: str) -> float:
         """Calculate how much the text changed after refinement"""
