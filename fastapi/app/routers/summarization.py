@@ -1,5 +1,5 @@
 """
-Summarization Router - BART-large-cnn with Pre/Post Processing
+Summarization Router - BART-large-cnn with Pre/Post Processing + mT5 Multilingual
 """
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -13,6 +13,10 @@ from app.schemas.summarization import (
 from app.services.summarization_service import (
     SummarizationService,
     get_summarization_service,
+)
+from app.services.multilingual_service import (
+    MultilingualSummarizationService,
+    get_multilingual_service,
 )
 
 
@@ -180,3 +184,49 @@ async def refine_text(
             detail=f"Refinement failed: {str(e)}"
         )
 
+
+@router.post("/multilingual", response_model=dict)
+async def summarize_multilingual(
+    request: SummarizationRequest,
+    service: MultilingualSummarizationService = Depends(get_multilingual_service)
+) -> dict:
+    """
+    Tóm tắt đa ngôn ngữ với mT5 (Multilingual T5).
+    
+    Hỗ trợ 101 ngôn ngữ bao gồm:
+    - Tiếng Việt (vi)
+    - Tiếng Anh (en)
+    - Tiếng Trung (zh)
+    - Tiếng Nhật (ja)
+    - Và 97 ngôn ngữ khác
+    
+    Lần đầu gọi sẽ download model (~900MB).
+    """
+    try:
+        raw_summary, processed_summary = service.summarize(
+            text=request.text,
+            max_length=request.max_length,
+            min_length=request.min_length
+        )
+        
+        return {
+            "raw_summary": raw_summary,
+            "final_summary": processed_summary,
+            "model": "google/mt5-base",
+            "original_length": len(request.text),
+            "final_summary_length": len(processed_summary),
+            "supported_languages": ["vi", "en", "zh", "ja", "ko", "th", "id", "..."]
+        }
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Multilingual summarization failed: {str(e)}"
+        )
+
+
+@router.get("/multilingual/info", response_model=dict)
+async def get_multilingual_info(
+    service: MultilingualSummarizationService = Depends(get_multilingual_service)
+) -> dict:
+    """Lấy thông tin về model đa ngôn ngữ"""
+    return service.get_model_info()
