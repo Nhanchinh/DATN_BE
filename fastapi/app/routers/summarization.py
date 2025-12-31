@@ -18,6 +18,10 @@ from app.services.multilingual_service import (
     MultilingualSummarizationService,
     get_multilingual_service,
 )
+from app.services.extractive_service import (
+    ExtractiveSummarizationService,
+    get_extractive_service,
+)
 
 
 router = APIRouter(prefix="/summarize", tags=["summarization"])
@@ -191,14 +195,9 @@ async def summarize_multilingual(
     service: MultilingualSummarizationService = Depends(get_multilingual_service)
 ) -> dict:
     """
-    Tóm tắt đa ngôn ngữ với mT5 (Multilingual T5).
+    Tóm tắt tiếng Việt với ViT5 (VietAI).
     
-    Hỗ trợ 101 ngôn ngữ bao gồm:
-    - Tiếng Việt (vi)
-    - Tiếng Anh (en)
-    - Tiếng Trung (zh)
-    - Tiếng Nhật (ja)
-    - Và 97 ngôn ngữ khác
+    Model được VietAI fine-tune đặc biệt cho tóm tắt tin tức tiếng Việt.
     
     Lần đầu gọi sẽ download model (~900MB).
     """
@@ -212,15 +211,15 @@ async def summarize_multilingual(
         return {
             "raw_summary": raw_summary,
             "final_summary": processed_summary,
-            "model": "google/mt5-base",
+            "model": "VietAI/vit5-base-vietnews-summarization",
             "original_length": len(request.text),
             "final_summary_length": len(processed_summary),
-            "supported_languages": ["vi", "en", "zh", "ja", "ko", "th", "id", "..."]
+            "language": "vi"
         }
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Multilingual summarization failed: {str(e)}"
+            detail=f"Vietnamese summarization failed: {str(e)}"
         )
 
 
@@ -229,4 +228,56 @@ async def get_multilingual_info(
     service: MultilingualSummarizationService = Depends(get_multilingual_service)
 ) -> dict:
     """Lấy thông tin về model đa ngôn ngữ"""
+    return service.get_model_info()
+
+
+@router.post("/extractive", response_model=dict)
+async def summarize_extractive(
+    request: SummarizationRequest,
+    service: ExtractiveSummarizationService = Depends(get_extractive_service)
+) -> dict:
+    """
+    Tóm tắt trích xuất với PhoBERT (Extractive Summarization).
+    
+    **AN TOÀN 100%** - Không bao giờ hallucinate!
+    
+    Chỉ trích xuất các câu quan trọng nhất từ văn bản gốc,
+    không viết lại hay thêm bất kỳ thông tin nào.
+    
+    Phù hợp cho: Mô tả sách, tài liệu kỹ thuật, nội dung cần chính xác.
+    
+    Lần đầu gọi sẽ download model (~400MB).
+    """
+    try:
+        # Calculate ratio based on max_length vs original length
+        ratio = min(0.5, max(0.2, request.max_length / len(request.text)))
+        
+        summary, extracted_sentences = service.summarize(
+            text=request.text,
+            ratio=ratio
+        )
+        
+        return {
+            "summary": summary,
+            "extracted_sentences": extracted_sentences,
+            "num_sentences_extracted": len(extracted_sentences),
+            "model": "vinai/phobert-base",
+            "method": "extractive",
+            "hallucination_risk": "ZERO",
+            "original_length": len(request.text),
+            "summary_length": len(summary),
+            "language": "vi"
+        }
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Extractive summarization failed: {str(e)}"
+        )
+
+
+@router.get("/extractive/info", response_model=dict)
+async def get_extractive_info(
+    service: ExtractiveSummarizationService = Depends(get_extractive_service)
+) -> dict:
+    """Lấy thông tin về model trích xuất"""
     return service.get_model_info()

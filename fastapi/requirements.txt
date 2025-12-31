@@ -21,3 +21,6 @@ email-validator>=2.0.0
 transformers>=4.35.0
 torch>=2.0.0
 sentencepiece>=0.1.99
+protobuf>=4.0.0
+bert-extractive-summarizer>=0.10.1
+scikit-learn>=1.0.0

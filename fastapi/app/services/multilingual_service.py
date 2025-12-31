@@ -1,6 +1,6 @@
 """
-Multilingual Summarization Service - Using Google mT5-base
-Supports 101 languages including Vietnamese and English
+Vietnamese Summarization Service - Using VietAI ViT5
+Fine-tuned specifically for Vietnamese news summarization
 """
 
 import logging
@@ -16,18 +16,16 @@ logger = logging.getLogger(__name__)
 
 class MultilingualSummarizationService:
     """
-    Multilingual summarization service using google/mt5-base.
+    Vietnamese summarization service using VietAI/vit5-base-vietnews-summarization.
     
-    mT5 (Multilingual T5) is trained on 101 languages including:
-    - Vietnamese (vi)
-    - English (en)
-    - And 99 other languages
+    ViT5 is a Vietnamese T5 model fine-tuned by VietAI specifically for
+    Vietnamese news article summarization.
     
-    This service complements the main BART-based service for
-    non-English text summarization.
+    Note: Despite the class name "Multilingual", this model is optimized
+    for Vietnamese. For English, use the main SummarizationService with BART.
     """
     
-    MODEL_NAME = "google/mt5-base"
+    MODEL_NAME = "VietAI/vit5-base-vietnews-summarization"
     
     def __init__(self):
         self._model = None
@@ -35,10 +33,10 @@ class MultilingualSummarizationService:
         self._device = "cuda" if torch.cuda.is_available() else "cpu"
         self._text_processor: TextProcessor = get_text_processor()
         
-        logger.info(f"MultilingualSummarizationService initialized. Device: {self._device}")
+        logger.info(f"ViT5 SummarizationService initialized. Device: {self._device}")
     
     def _load_model(self) -> None:
-        """Lazy load mT5-base model"""
+        """Lazy load ViT5 model"""
         if self._model is None:
             logger.info(f"Loading {self.MODEL_NAME}... (this may take 1-2 minutes)")
             self._tokenizer = AutoTokenizer.from_pretrained(self.MODEL_NAME)
@@ -52,16 +50,16 @@ class MultilingualSummarizationService:
         text: str,
         max_length: int = 150,
         min_length: int = 30,
-        language: str = "auto"
+        language: str = "vi"
     ) -> Tuple[str, str]:
         """
-        Summarize text in any of 101 supported languages.
+        Summarize Vietnamese text.
         
         Args:
-            text: Input text to summarize
+            text: Input Vietnamese text to summarize
             max_length: Maximum summary length (in tokens)
             min_length: Minimum summary length (in tokens)
-            language: Language hint (auto, vi, en, etc.) - currently unused
+            language: Language hint (vi for Vietnamese)
             
         Returns:
             Tuple[str, str]: (raw_summary, processed_summary)
@@ -71,14 +69,13 @@ class MultilingualSummarizationService:
         # PRE-PROCESSING
         cleaned_text = self._text_processor.preprocess(text)
         
-        # mT5 uses task prefix for summarization
-        # Using "summarize:" prefix which works for multilingual
-        input_text = f"summarize: {cleaned_text}"
+        # ViT5 fine-tuned model - just use the text directly (no prefix needed)
+        input_text = cleaned_text
         
         inputs = self._tokenizer(
             input_text,
             return_tensors="pt",
-            max_length=512,
+            max_length=1024,
             truncation=True
         ).to(self._device)
         
@@ -95,9 +92,12 @@ class MultilingualSummarizationService:
         
         raw_summary = self._tokenizer.decode(outputs[0], skip_special_tokens=True)
         
-        # POST-PROCESSING
-        entities = self._text_processor.extract_entities(text)
-        processed_summary = self._text_processor.postprocess(raw_summary, entities)
+        # POST-PROCESSING (lighter for Vietnamese)
+        processed_summary = raw_summary.strip()
+        
+        # Ensure proper ending
+        if processed_summary and processed_summary[-1] not in '.!?':
+            processed_summary += '.'
         
         return raw_summary, processed_summary
     
@@ -105,10 +105,11 @@ class MultilingualSummarizationService:
         """Return information about the model"""
         return {
             "model_name": self.MODEL_NAME,
-            "description": "Multilingual T5 (mT5) - supports 101 languages",
-            "supported_languages": ["vi", "en", "zh", "ja", "ko", "th", "id", "and 94 more..."],
+            "description": "ViT5 - Vietnamese T5 fine-tuned for news summarization by VietAI",
+            "supported_languages": ["vi"],
             "model_size": "~900MB",
-            "loaded": self._model is not None
+            "loaded": self._model is not None,
+            "organization": "VietAI (Vietnamese AI Community)"
         }
 
 
