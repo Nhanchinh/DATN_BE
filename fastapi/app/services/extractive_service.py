@@ -173,6 +173,11 @@ class ExtractiveSummarizationService:
         
         Uses cosine similarity between sentence embedding and document embedding.
         Sentences more similar to the overall document are considered more important.
+        
+        Also applies KEYWORD BOOSTING to prioritize:
+        - Financial information (tiền, ngân sách)
+        - Technology keywords (AI, Python, Machine Learning)
+        - Important statistics
         """
         if not sentences:
             return []
@@ -206,7 +211,93 @@ class ExtractiveSummarizationService:
             position_bonus = 0.02 * (1 - i / len(scores))
             scores[i] += position_bonus
         
+        # ============ KEYWORD BOOSTING ============
+        # Tăng điểm cho câu chứa thông tin quan trọng
+        scores = self._apply_keyword_boosting(sentences, scores)
+        
         return scores
+    
+    def _apply_keyword_boosting(
+        self, 
+        sentences: List[str], 
+        scores: List[float]
+    ) -> List[float]:
+        """
+        Apply keyword boosting to prioritize important information.
+        
+        Boost categories (đảm bảo bao phủ đủ các khía cạnh):
+        - Financial (tỷ đồng, ngân sách, kinh phí): +20%
+        - Human (giáo viên, chuyên gia, tiến sĩ): +15%
+        - Technology (AI, Python, Machine Learning): +15%
+        - Statistics (%, số liệu, thống kê): +10%
+        - Timeline (lộ trình, giai đoạn, năm 20xx): +10%
+        """
+        # Từ khóa tiền tệ/ngân sách (QUAN TRỌNG NHẤT)
+        FINANCIAL_KEYWORDS = [
+            "tỷ đồng", "triệu đồng", "ngân sách", "kinh phí", 
+            "đầu tư", "chi phí", "vốn", "tài chính"
+        ]
+        
+        # Từ khóa về con người (QUAN TRỌNG - tránh mất thông tin nhân sự)
+        HUMAN_KEYWORDS = [
+            "giáo viên", "chuyên gia", "tiến sĩ", "giáo sư", 
+            "nhân lực", "đào tạo", "bổ sung", "tuyển dụng",
+            "phụ huynh", "học sinh"
+        ]
+        
+        # Từ khóa công nghệ
+        TECH_KEYWORDS = [
+            "ai", "python", "machine learning", "data science",
+            "trí tuệ nhân tạo", "công nghệ", "lập trình", "phần mềm"
+        ]
+        
+        # Từ khóa thống kê
+        STAT_KEYWORDS = [
+            "thống kê", "khảo sát", "báo cáo", "số liệu"
+        ]
+        
+        # Từ khóa lộ trình/thời gian
+        TIMELINE_KEYWORDS = [
+            "lộ trình", "giai đoạn", "thí điểm", "triển khai",
+            "dự kiến", "kế hoạch", "năm 2026", "năm 2027", "năm 2028", "năm 2030"
+        ]
+        
+        boosted_scores = scores.copy()
+        
+        for i, sent in enumerate(sentences):
+            sent_lower = sent.lower()
+            
+            # Financial boost (+20%)
+            if any(kw in sent_lower for kw in FINANCIAL_KEYWORDS):
+                boosted_scores[i] *= 1.20
+                logger.debug(f"💰 Financial boost for sentence {i}")
+            
+            # Human aspect boost (+15%) - Đảm bảo có thông tin về con người
+            if any(kw in sent_lower for kw in HUMAN_KEYWORDS):
+                boosted_scores[i] *= 1.15
+                logger.debug(f"👤 Human boost for sentence {i}")
+            
+            # Technology boost (+15%)
+            if any(kw in sent_lower for kw in TECH_KEYWORDS):
+                boosted_scores[i] *= 1.15
+                logger.debug(f"🖥️ Tech boost for sentence {i}")
+            
+            # Statistics boost (+10%)
+            if any(kw in sent_lower for kw in STAT_KEYWORDS):
+                boosted_scores[i] *= 1.10
+                logger.debug(f"📊 Stats boost for sentence {i}")
+            
+            # Timeline boost (+10%) - Đảm bảo có lộ trình
+            if any(kw in sent_lower for kw in TIMELINE_KEYWORDS):
+                boosted_scores[i] *= 1.10
+                logger.debug(f"📅 Timeline boost for sentence {i}")
+            
+            # Percentage boost (+10%) - Câu có % thường quan trọng
+            if re.search(r'\d+\s*%', sent):
+                boosted_scores[i] *= 1.10
+                logger.debug(f"📈 Percentage boost for sentence {i}")
+        
+        return boosted_scores
     
     def _select_with_mmr(
         self,
@@ -557,14 +648,49 @@ class ExtractiveSummarizationService:
         # Compute importance scores
         scores = self._compute_sentence_scores(all_sentences)
         
-        # Use MMR to select diverse sentences (not just top-k)
-        # This prevents position bias and ensures coverage of entire document
-        selected_indices = self._select_with_mmr(
-            sentences=all_sentences,
-            scores=scores,
-            k=num_to_extract,
-            lambda_param=0.5  # Balance between relevance and diversity
+        # ========== CHIẾN THUẬT "LEAD BIAS" ==========
+        # Trong báo chí/văn bản hành chính, câu đầu tiên luôn chứa thông tin
+        # quan trọng nhất (Ai, Cái gì, Khi nào) -> LUÔN LUÔN giữ câu đầu
+        
+        # Kiểm tra câu đầu có đủ dài và có vẻ là intro không
+        first_sentence_is_intro = (
+            len(all_sentences) > 0 and 
+            len(all_sentences[0]) > 30 and  # Đủ dài
+            not all_sentences[0].lower().startswith(('tuy nhiên', 'mặc dù', 'nhưng'))  # Không phải câu đối lập
         )
+        
+        if first_sentence_is_intro and num_to_extract > 1:
+            # Luôn chọn câu đầu tiên
+            selected_indices = [0]
+            
+            # Dùng MMR để chọn các câu còn lại (trừ câu đầu)
+            remaining_sentences = all_sentences[1:]
+            remaining_scores = scores[1:]
+            
+            if len(remaining_sentences) > 0:
+                # Chọn thêm (num_to_extract - 1) câu từ phần còn lại
+                remaining_k = num_to_extract - 1
+                
+                remaining_selected = self._select_with_mmr(
+                    sentences=remaining_sentences,
+                    scores=remaining_scores,
+                    k=remaining_k,
+                    lambda_param=0.4
+                )
+                
+                # Chuyển đổi index về index gốc (cộng 1 vì đã bỏ câu đầu)
+                for idx in remaining_selected:
+                    selected_indices.append(idx + 1)
+            
+            logger.debug(f"📰 Lead Bias: Always included first sentence")
+        else:
+            # Văn bản ngắn hoặc không có intro rõ ràng -> dùng MMR bình thường
+            selected_indices = self._select_with_mmr(
+                sentences=all_sentences,
+                scores=scores,
+                k=num_to_extract,
+                lambda_param=0.4
+            )
         
         # Sort by position and extract (no windowing to avoid exceeding k)
         selected_indices.sort()
