@@ -215,11 +215,11 @@ async def summarize_multilingual(
     service: MultilingualSummarizationService = Depends(get_multilingual_service)
 ) -> dict:
     """
-    Tóm tắt tiếng Việt với ViT5 (VietAI).
+    Tóm tắt tiếng Việt với ViT5 đã fine-tune.
     
-    Model được VietAI fine-tune đặc biệt cho tóm tắt tin tức tiếng Việt.
+    Model ViT5-base được fine-tune thêm cho tóm tắt tiếng Việt.
     
-    Lần đầu gọi sẽ download model (~900MB).
+    Sử dụng model local: AI_Models/my_vit5_model (~900MB).
     """
     try:
         raw_summary, processed_summary = service.summarize(
@@ -231,7 +231,7 @@ async def summarize_multilingual(
         return {
             "raw_summary": raw_summary,
             "final_summary": processed_summary,
-            "model": "VietAI/vit5-base-vietnews-summarization",
+            "model": "AI_Models/my_vit5_model (finetuned ViT5)",
             "original_length": len(request.text),
             "final_summary_length": len(processed_summary),
             "language": "vi"
@@ -382,14 +382,14 @@ async def summarize_hybrid(
     
     **Pipeline:**
     1. **Stage 1 (PhoBERT)**: Trích xuất câu quan trọng → An toàn, không bịa
-    2. **Stage 2 (ViT5)**: Viết lại mượt mà → Văn phong tự nhiên
+    2. **Stage 2 (mT5-XLSum)**: Viết lại mượt mà → Văn phong tự nhiên
     
     **Ưu điểm:**
-    - Ít hallucinate hơn ViT5 thuần (vì input ngắn)
+    - Ít hallucinate hơn (mT5-XLSum đa dạng hơn ViT5)
     - Mượt mà hơn PhoBERT thuần
-    - Độ bao phủ tốt
+    - Hỗ trợ 44+ ngôn ngữ
     
-    Lần đầu gọi sẽ load 2 models (~400MB + ~900MB).
+    Lần đầu gọi sẽ load 2 models (~400MB + ~1.2GB).
     """
     try:
         result = service.summarize(
@@ -543,6 +543,67 @@ async def summarize_hybrid_bartpho(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Hybrid BARTpho summarization failed: {str(e)}"
+        )
+
+
+@router.post("/hybrid-vit5", response_model=dict)
+async def summarize_hybrid_vit5(
+    request: SummarizationRequest,
+    extractive_service: ExtractiveSummarizationService = Depends(get_extractive_service),
+    vit5_service: MultilingualSummarizationService = Depends(get_multilingual_service)
+) -> dict:
+    """
+    Tóm tắt Hybrid: PhoBERT (Extractive) + ViT5 Finetuned (Rewrite).
+    
+    **Pipeline 2 bước (Chia để trị):**
+    1. **PhoBERT**: Trích xuất câu quan trọng → Không bịa thông tin
+    2. **ViT5 Local**: Làm mượt TỪNG CÂU riêng lẻ → Giữ nguyên tất cả ý
+    
+    **Ưu điểm:**
+    - Xử lý từng câu đúng với cách model được train
+    - KHÔNG mất ý (mỗi câu được xử lý riêng)
+    - Văn phong tiếng Việt chuẩn
+    
+    Lần đầu gọi sẽ load 2 models (~400MB + ~900MB = ~1.3GB).
+    """
+    try:
+        # Stage 1: PhoBERT extractive
+        extractive_result = extractive_service.summarize_by_ratio(
+            text=request.text,
+            ratio=0.4,  # Extract 40% important sentences
+            min_sentences=2,
+            max_sentences=5
+        )
+        
+        extracted_sentences = extractive_result.get("extracted_sentences", [])
+        extractive_summary = extractive_result.get("summary", "")
+        
+        # Stage 2: ViT5 finetuned - XỬ LÝ TỪNG CÂU RIÊNG LẺ (Chia để trị)
+        # Đây là cách đúng vì model được train với input là 1 câu
+        if extracted_sentences:
+            final_summary = vit5_service.smooth_sentences(extracted_sentences)
+        else:
+            final_summary = extractive_summary
+        
+        return {
+            "stage1_extracted": extractive_summary,
+            "stage1_sentences": extracted_sentences,
+            "stage1_length": len(extractive_summary),
+            "stage1_model": "vinai/phobert-base",
+            "stage2_rewritten": final_summary,
+            "final_summary": final_summary,
+            "stage2_model": "AI_Models/my_vit5_model (finetuned ViT5)",
+            "pipeline": "PhoBERT (extractive) → ViT5 (smooth từng câu)",
+            "method": "Chia để trị - xử lý từng câu riêng lẻ",
+            "original_length": len(request.text),
+            "final_length": len(final_summary),
+            "compression_ratio": round(len(final_summary) / len(request.text), 3) if len(request.text) > 0 else 0,
+            "hallucination_risk": "VERY LOW (PhoBERT grounds + ViT5 smooths each sentence)"
+        }
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Hybrid ViT5 summarization failed: {str(e)}"
         )
 
 
