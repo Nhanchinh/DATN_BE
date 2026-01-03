@@ -30,24 +30,12 @@ from app.services.bartpho_service import (
     BARTphoService,
     get_bartpho_service,
 )
-from app.services.qwen_service import (
-    QwenService,
-    get_qwen_service,
-)
-from app.services.qwen_15b_service import (
-    Qwen15BService,
-    get_qwen_15b_service,
-)
-from app.services.qwen_strict_service import (
-    QwenStrictService,
-    get_qwen_strict_service,
-)
 
 
 router = APIRouter(prefix="/summarize", tags=["summarization"])
 
 
-@router.post("", response_model=SummarizationResponse)
+@router.post("", response_model=SummarizationResponse, summary="[BART-cnn] Tóm tắt tiếng Anh")
 async def summarize_text(
     request: SummarizationRequest,
     service: SummarizationService = Depends(get_summarization_service)
@@ -81,7 +69,7 @@ async def summarize_text(
         )
 
 
-@router.post("/balanced", response_model=dict)
+@router.post("/balanced", response_model=dict, summary="[BART-cnn] Tóm tắt cân bằng theo topic")
 async def summarize_balanced(
     request: SummarizationRequest,
     service: SummarizationService = Depends(get_summarization_service)
@@ -117,7 +105,7 @@ async def summarize_balanced(
         )
 
 
-@router.post("/detailed", response_model=dict)
+@router.post("/detailed", response_model=dict, summary="[BART-cnn] Phân tích chi tiết")
 async def summarize_with_details(
     request: SummarizationRequest,
     service: SummarizationService = Depends(get_summarization_service)
@@ -147,7 +135,7 @@ async def summarize_with_details(
         )
 
 
-@router.post("/raw", response_model=dict)
+@router.post("/raw", response_model=dict, summary="[BART-cnn] Tóm tắt thô (không hậu xử lý)")
 async def summarize_raw_only(
     request: SummarizationRequest,
     service: SummarizationService = Depends(get_summarization_service)
@@ -177,7 +165,7 @@ async def summarize_raw_only(
         )
 
 
-@router.post("/refine", response_model=RefineResponse)
+@router.post("/refine", response_model=RefineResponse, summary="[POST-PROCESS] Tinh chỉnh văn bản")
 async def refine_text(
     request: RefineRequest,
     service: SummarizationService = Depends(get_summarization_service)
@@ -209,7 +197,7 @@ async def refine_text(
         )
 
 
-@router.post("/multilingual", response_model=dict)
+@router.post("/multilingual", response_model=dict, summary="[ViT5-Finetuned] Tóm tắt tiếng Việt")
 async def summarize_multilingual(
     request: SummarizationRequest,
     service: MultilingualSummarizationService = Depends(get_multilingual_service)
@@ -243,7 +231,7 @@ async def summarize_multilingual(
         )
 
 
-@router.get("/multilingual/info", response_model=dict)
+@router.get("/multilingual/info", response_model=dict, summary="[ViT5] Thông tin model")
 async def get_multilingual_info(
     service: MultilingualSummarizationService = Depends(get_multilingual_service)
 ) -> dict:
@@ -251,7 +239,7 @@ async def get_multilingual_info(
     return service.get_model_info()
 
 
-@router.post("/extractive", response_model=dict)
+@router.post("/extractive", response_model=dict, summary="[PhoBERT] Trích xuất câu quan trọng")
 async def summarize_extractive(
     request: SummarizationRequest,
     service: ExtractiveSummarizationService = Depends(get_extractive_service)
@@ -295,7 +283,7 @@ async def summarize_extractive(
         )
 
 
-@router.post("/chunked", response_model=dict)
+@router.post("/chunked", response_model=dict, summary="[PhoBERT] Trích xuất theo chunks")
 async def summarize_chunked(
     request: SummarizationRequest,
     service: ExtractiveSummarizationService = Depends(get_extractive_service)
@@ -329,7 +317,7 @@ async def summarize_chunked(
         )
 
 
-@router.post("/smart", response_model=dict)
+@router.post("/smart", response_model=dict, summary="[PhoBERT] ⭐ Trích xuất thông minh (RECOMMENDED)")
 async def summarize_smart(
     request: SummarizationRequest,
     service: ExtractiveSummarizationService = Depends(get_extractive_service)
@@ -364,7 +352,7 @@ async def summarize_smart(
         )
 
 
-@router.get("/extractive/info", response_model=dict)
+@router.get("/extractive/info", response_model=dict, summary="[PhoBERT] Thông tin model")
 async def get_extractive_info(
     service: ExtractiveSummarizationService = Depends(get_extractive_service)
 ) -> dict:
@@ -372,7 +360,7 @@ async def get_extractive_info(
     return service.get_model_info()
 
 
-@router.post("/hybrid", response_model=dict)
+@router.post("/hybrid", response_model=dict, summary="[PhoBERT → mT5-XLSum] Hybrid tóm tắt")
 async def summarize_hybrid(
     request: SummarizationRequest,
     service: HybridSummarizationService = Depends(get_hybrid_service)
@@ -405,7 +393,7 @@ async def summarize_hybrid(
         )
 
 
-@router.get("/hybrid/info", response_model=dict)
+@router.get("/hybrid/info", response_model=dict, summary="[Hybrid] Thông tin pipeline")
 async def get_hybrid_info(
     service: HybridSummarizationService = Depends(get_hybrid_service)
 ) -> dict:
@@ -415,7 +403,7 @@ async def get_hybrid_info(
 
 # ==================== BARTpho Endpoints ====================
 
-@router.post("/bartpho", response_model=dict)
+@router.post("/bartpho", response_model=dict, summary="[BARTpho] Tóm tắt tiếng Việt")
 async def summarize_bartpho(
     request: SummarizationRequest,
     service: BARTphoService = Depends(get_bartpho_service)
@@ -450,7 +438,7 @@ async def summarize_bartpho(
         )
 
 
-@router.post("/bartpho/paraphrase", response_model=dict)
+@router.post("/bartpho/paraphrase", response_model=dict, summary="[BARTpho] Viết lại (paraphrase)")
 async def paraphrase_text(
     request: SummarizationRequest,
     service: BARTphoService = Depends(get_bartpho_service)
@@ -487,7 +475,7 @@ async def paraphrase_text(
         )
 
 
-@router.post("/hybrid-bartpho", response_model=dict)
+@router.post("/hybrid-bartpho", response_model=dict, summary="[PhoBERT → BARTpho] Hybrid Việt")
 async def summarize_hybrid_bartpho(
     request: SummarizationRequest,
     extractive_service: ExtractiveSummarizationService = Depends(get_extractive_service),
@@ -546,7 +534,7 @@ async def summarize_hybrid_bartpho(
         )
 
 
-@router.post("/hybrid-vit5", response_model=dict)
+@router.post("/hybrid-vit5", response_model=dict, summary="[PhoBERT → ViT5] ⭐ Hybrid BEST (RECOMMENDED)")
 async def summarize_hybrid_vit5(
     request: SummarizationRequest,
     extractive_service: ExtractiveSummarizationService = Depends(get_extractive_service),
@@ -607,405 +595,9 @@ async def summarize_hybrid_vit5(
         )
 
 
-@router.get("/bartpho/info", response_model=dict)
+@router.get("/bartpho/info", response_model=dict, summary="[BARTpho] Thông tin model")
 async def get_bartpho_info(
     service: BARTphoService = Depends(get_bartpho_service)
 ) -> dict:
-    """Lấy thông tin về model BARTpho"""
     return service.get_model_info()
 
-
-# ==================== Qwen Endpoints ====================
-
-@router.post("/qwen/fuse", response_model=dict)
-async def fuse_with_qwen(
-    request: SummarizationRequest,
-    service: QwenService = Depends(get_qwen_service)
-) -> dict:
-    """
-    Nối các câu rời rạc thành đoạn văn mượt mà với Qwen.
-    
-    **Input:** Các câu cách nhau bởi dấu chấm.
-    **Output:** Đoạn văn liền mạch, tự nhiên.
-    
-    Qwen hiểu instruction rất tốt, sẽ tự thêm từ nối phù hợp.
-    Model nhẹ (~500MB), chạy được trên CPU.
-    """
-    try:
-        # Split input into sentences
-        sentences = [s.strip() for s in request.text.split('.') if s.strip()]
-        
-        fused_text = service.fuse_sentences(sentences)
-        
-        return {
-            "original_sentences": sentences,
-            "fused_text": fused_text,
-            "model": "Qwen/Qwen2.5-0.5B-Instruct",
-            "method": "instruction-based fusion",
-            "original_length": len(request.text),
-            "fused_length": len(fused_text)
-        }
-    except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Qwen fusion failed: {str(e)}"
-        )
-
-
-@router.post("/qwen/paraphrase", response_model=dict)
-async def paraphrase_with_qwen(
-    request: SummarizationRequest,
-    service: QwenService = Depends(get_qwen_service)
-) -> dict:
-    """
-    Viết lại văn bản mượt mà hơn với Qwen.
-    
-    **Qwen 2.5** là LLM nhẹ nhưng thông minh, hiểu tiếng Việt tốt.
-    Sẽ giữ nguyên thông tin nhưng viết lại với văn phong tự nhiên hơn.
-    """
-    try:
-        paraphrased = service.paraphrase(request.text)
-        
-        return {
-            "original_text": request.text,
-            "paraphrased_text": paraphrased,
-            "model": "Qwen/Qwen2.5-0.5B-Instruct",
-            "method": "instruction-based paraphrase",
-            "original_length": len(request.text),
-            "paraphrased_length": len(paraphrased)
-        }
-    except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Qwen paraphrase failed: {str(e)}"
-        )
-
-
-@router.post("/hybrid-qwen", response_model=dict)
-async def summarize_hybrid_qwen(
-    request: SummarizationRequest,
-    extractive_service: ExtractiveSummarizationService = Depends(get_extractive_service),
-    qwen_service: QwenService = Depends(get_qwen_service)
-) -> dict:
-    """
-    Tóm tắt Hybrid: PhoBERT (Extractive) + Qwen (Fusion).
-    
-    **Pipeline 2 bước:**
-    1. **PhoBERT**: Trích xuất câu quan trọng → Không bịa thông tin
-    2. **Qwen**: Viết lại thành đoạn văn mượt mà → Văn phong tự nhiên
-    
-    **Ưu điểm:**
-    - Qwen hiểu instruction tốt hơn BARTpho
-    - Siêu nhẹ (~400MB + ~500MB = ~900MB tổng)
-    - Ít hallucinate vì input đã được lọc bởi PhoBERT
-    """
-    try:
-        # Stage 1: PhoBERT extractive
-        extractive_result = extractive_service.summarize_by_ratio(
-            text=request.text,
-            ratio=0.4,  # Extract 40% important sentences
-            min_sentences=2,
-            max_sentences=5
-        )
-        
-        extracted_sentences = extractive_result.get("extracted_sentences", [])
-        extractive_summary = extractive_result.get("summary", "")
-        
-        # Stage 2: Qwen fusion
-        if extracted_sentences:
-            fused_summary = qwen_service.fuse_sentences(extracted_sentences)
-        else:
-            fused_summary = extractive_summary
-        
-        return {
-            "stage1_extractive": extractive_summary,
-            "stage1_sentences": extracted_sentences,
-            "stage1_model": "vinai/phobert-base",
-            "final_summary": fused_summary,
-            "final_model": "Qwen/Qwen2.5-0.5B-Instruct",
-            "pipeline": "PhoBERT (extractive) → Qwen (fusion)",
-            "original_length": len(request.text),
-            "extractive_length": len(extractive_summary),
-            "final_length": len(fused_summary),
-            "hallucination_risk": "LOW (Qwen follows instruction + grounded in extracted sentences)"
-        }
-    except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Hybrid Qwen summarization failed: {str(e)}"
-        )
-
-
-@router.post("/qwen", response_model=dict)
-async def summarize_with_qwen(
-    request: SummarizationRequest,
-    service: QwenService = Depends(get_qwen_service)
-) -> dict:
-    """
-    Tóm tắt trực tiếp với Qwen (không qua PhoBERT).
-    
-    **Lưu ý:** Có thể hallucinate nếu văn bản quá dài.
-    Khuyến khích dùng `/summarize/hybrid-qwen` để an toàn hơn.
-    """
-    try:
-        summary = service.summarize(request.text)
-        
-        return {
-            "summary": summary,
-            "model": "Qwen/Qwen2.5-0.5B-Instruct",
-            "method": "instruction-based summarization",
-            "original_length": len(request.text),
-            "summary_length": len(summary),
-            "warning": "Direct LLM summarization may hallucinate. Use /hybrid-qwen for safer results."
-        }
-    except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Qwen summarization failed: {str(e)}"
-        )
-
-
-@router.get("/qwen/info", response_model=dict)
-async def get_qwen_info(
-    service: QwenService = Depends(get_qwen_service)
-) -> dict:
-    """Lấy thông tin về model Qwen"""
-    return service.get_model_info()
-
-
-# ==================== Qwen 1.5B Endpoints (More Accurate) ====================
-
-@router.post("/hybrid-qwen-1.5b", response_model=dict)
-async def summarize_hybrid_qwen_15b(
-    request: SummarizationRequest,
-    extractive_service: ExtractiveSummarizationService = Depends(get_extractive_service),
-    qwen_service: Qwen15BService = Depends(get_qwen_15b_service)
-) -> dict:
-    """
-    Tóm tắt Hybrid: PhoBERT (Extractive) + **Qwen 1.5B** (Fusion).
-    
-    **Model 1.5B thông minh hơn 0.5B:**
-    - Hiểu logic tốt hơn (ai làm gì)
-    - Giữ chính xác chủ ngữ
-    - Ít hallucinate hơn
-    
-    **RAM:** ~2GB (laptop chạy tốt)
-    """
-    try:
-        # Stage 1: PhoBERT extractive
-        extractive_result = extractive_service.summarize_by_ratio(
-            text=request.text,
-            ratio=0.4,
-            min_sentences=2,
-            max_sentences=5
-        )
-        
-        extracted_sentences = extractive_result.get("extracted_sentences", [])
-        extractive_summary = extractive_result.get("summary", "")
-        
-        # Stage 2: Qwen 1.5B fusion
-        if extracted_sentences:
-            fused_summary = qwen_service.fuse_sentences(extracted_sentences)
-        else:
-            fused_summary = extractive_summary
-        
-        return {
-            "stage1_extractive": extractive_summary,
-            "stage1_sentences": extracted_sentences,
-            "stage1_model": "vinai/phobert-base",
-            "final_summary": fused_summary,
-            "final_model": "Qwen/Qwen2.5-1.5B-Instruct",
-            "pipeline": "PhoBERT (extractive) → Qwen-1.5B (fusion)",
-            "original_length": len(request.text),
-            "extractive_length": len(extractive_summary),
-            "final_length": len(fused_summary),
-            "model_advantage": "1.5B = 3x more parameters = better reasoning",
-            "hallucination_risk": "VERY LOW (smarter model + grounded input)"
-        }
-    except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Hybrid Qwen 1.5B summarization failed: {str(e)}"
-        )
-
-
-@router.get("/qwen-1.5b/info", response_model=dict)
-async def get_qwen_15b_info(
-    service: Qwen15BService = Depends(get_qwen_15b_service)
-) -> dict:
-    """Lấy thông tin về model Qwen 1.5B"""
-    return service.get_model_info()
-
-
-# ==================== Qwen Strict Endpoints (Maximum Accuracy) ====================
-
-@router.post("/hybrid-qwen-strict", response_model=dict)
-async def summarize_hybrid_qwen_strict(
-    request: SummarizationRequest,
-    extractive_service: ExtractiveSummarizationService = Depends(get_extractive_service),
-    qwen_service: QwenStrictService = Depends(get_qwen_strict_service)
-) -> dict:
-    """
-    Tóm tắt Hybrid: PhoBERT + **Qwen Strict Prompting**.
-    
-    **Sử dụng Prompt nghiêm ngặt để:**
-    - KHÔNG thêm thông tin mới
-    - GIỮ NGUYÊN chủ ngữ hành động
-    - GIỮ NGUYÊN số liệu chính xác
-    - KHÔNG thêm tính từ đánh giá
-    
-    **Trade-off:** Ít mượt mà hơn, nhưng chính xác hơn.
-    **Dùng cho:** Văn bản pháp lý, hành chính.
-    """
-    try:
-        # Stage 1: PhoBERT extractive
-        extractive_result = extractive_service.summarize_by_ratio(
-            text=request.text,
-            ratio=0.4,
-            min_sentences=2,
-            max_sentences=5
-        )
-        
-        extracted_sentences = extractive_result.get("extracted_sentences", [])
-        extractive_summary = extractive_result.get("summary", "")
-        
-        # Stage 2: Qwen Strict fusion
-        if extracted_sentences:
-            fused_summary = qwen_service.fuse_sentences(extracted_sentences)
-        else:
-            fused_summary = extractive_summary
-        
-        return {
-            "stage1_extractive": extractive_summary,
-            "stage1_sentences": extracted_sentences,
-            "stage1_model": "vinai/phobert-base",
-            "final_summary": fused_summary,
-            "final_model": "Qwen/Qwen2.5-0.5B-Instruct (STRICT MODE)",
-            "pipeline": "PhoBERT (extractive) → Qwen-Strict (fusion)",
-            "original_length": len(request.text),
-            "extractive_length": len(extractive_summary),
-            "final_length": len(fused_summary),
-            "strict_rules": [
-                "KHÔNG thêm thông tin mới",
-                "GIỮ NGUYÊN chủ ngữ",
-                "GIỮ NGUYÊN số liệu"
-            ],
-            "hallucination_risk": "MINIMAL (strict prompting)"
-        }
-    except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Hybrid Qwen Strict summarization failed: {str(e)}"
-        )
-
-
-@router.get("/qwen-strict/info", response_model=dict)
-async def get_qwen_strict_info(
-    service: QwenStrictService = Depends(get_qwen_strict_service)
-) -> dict:
-    """Lấy thông tin về model Qwen Strict"""
-    return service.get_model_info()
-
-
-# ==================== Comparison Endpoint (All 3 Variants) ====================
-
-@router.post("/compare-qwen", response_model=dict)
-async def compare_all_qwen_variants(
-    request: SummarizationRequest,
-    extractive_service: ExtractiveSummarizationService = Depends(get_extractive_service),
-    qwen_05b: QwenService = Depends(get_qwen_service),
-    qwen_15b: Qwen15BService = Depends(get_qwen_15b_service),
-    qwen_strict: QwenStrictService = Depends(get_qwen_strict_service)
-) -> dict:
-    """
-    **SO SÁNH TẤT CẢ 3 PHIÊN BẢN QWEN** trong một request.
-    
-    Sử dụng cùng input từ PhoBERT, so sánh kết quả của:
-    1. **Qwen 0.5B** - Nhẹ, nhanh, mượt nhưng có thể sai logic
-    2. **Qwen 1.5B** - Thông minh hơn, ít sai hơn
-    3. **Qwen Strict** - Prompt chặt, chính xác nhất nhưng ít mượt
-    
-    **⚠️ Lưu ý:** Lần đầu gọi sẽ download cả 3 models (~4GB tổng).
-    """
-    try:
-        # Stage 1: PhoBERT extractive (shared)
-        extractive_result = extractive_service.summarize_by_ratio(
-            text=request.text,
-            ratio=0.4,
-            min_sentences=2,
-            max_sentences=5
-        )
-        
-        extracted_sentences = extractive_result.get("extracted_sentences", [])
-        extractive_summary = extractive_result.get("summary", "")
-        
-        # Stage 2: All 3 Qwen variants
-        results = {
-            "input": {
-                "original_text": request.text,
-                "original_length": len(request.text)
-            },
-            "stage1_phobert": {
-                "summary": extractive_summary,
-                "sentences": extracted_sentences,
-                "length": len(extractive_summary)
-            }
-        }
-        
-        # Qwen 0.5B
-        if extracted_sentences:
-            try:
-                result_05b = qwen_05b.fuse_sentences(extracted_sentences)
-                results["qwen_0.5b"] = {
-                    "summary": result_05b,
-                    "length": len(result_05b),
-                    "model": "Qwen/Qwen2.5-0.5B-Instruct",
-                    "characteristics": "Nhẹ, nhanh, mượt nhưng có thể sai chủ ngữ/thêm thông tin"
-                }
-            except Exception as e:
-                results["qwen_0.5b"] = {"error": str(e)}
-        
-        # Qwen 1.5B
-        if extracted_sentences:
-            try:
-                result_15b = qwen_15b.fuse_sentences(extracted_sentences)
-                results["qwen_1.5b"] = {
-                    "summary": result_15b,
-                    "length": len(result_15b),
-                    "model": "Qwen/Qwen2.5-1.5B-Instruct",
-                    "characteristics": "Thông minh hơn, giữ chính xác chủ ngữ, ít hallucinate"
-                }
-            except Exception as e:
-                results["qwen_1.5b"] = {"error": str(e)}
-        
-        # Qwen Strict
-        if extracted_sentences:
-            try:
-                result_strict = qwen_strict.fuse_sentences(extracted_sentences)
-                results["qwen_strict"] = {
-                    "summary": result_strict,
-                    "length": len(result_strict),
-                    "model": "Qwen/Qwen2.5-0.5B-Instruct (STRICT)",
-                    "characteristics": "Prompt nghiêm ngặt, chính xác nhất, ít mượt hơn"
-                }
-            except Exception as e:
-                results["qwen_strict"] = {"error": str(e)}
-        
-        results["comparison_guide"] = {
-            "fluency": "0.5B > 1.5B > Strict (mượt mà giảm dần)",
-            "accuracy": "Strict > 1.5B > 0.5B (chính xác tăng dần)",
-            "speed": "0.5B > Strict > 1.5B (nhanh giảm dần)",
-            "recommendation": {
-                "chat_app": "0.5B (nhanh, mượt)",
-                "news_summary": "1.5B (cân bằng)",
-                "legal_docs": "Strict (chính xác cao)"
-            }
-        }
-        
-        return results
-        
-    except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Comparison failed: {str(e)}"
-        )
