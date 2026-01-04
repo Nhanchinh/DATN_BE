@@ -642,13 +642,12 @@ async def summarize_hybrid_phobert_paraphrase(
     Lần đầu gọi sẽ load 2 models (~1.8GB tổng).
     """
     try:
-        # ========== STEP 1: PhoBERT EXTRACTION ==========
-        # Extract top 8 important sentences using summarize_by_ratio
-        extractive_result = extractive_service.summarize_by_ratio(
+        # ========== STEP 1: PhoBERT SEGMENTATION EXTRACTION ==========
+        # Use segmentation strategy (2-5-2) to fix lead-bias
+        extractive_result = extractive_service.extract_with_segmentation(
             text=request.text,
-            ratio=0.6,  # Extract 60% of sentences
-            min_sentences=5,
-            max_sentences=8  # Top 8 sentences
+            quotas={"intro": 2, "body": 5, "conclusion": 2},  # 2-5-2 distribution
+            total_sentences=9  # Divisible by chunk_size=3
         )
         
         extracted_sentences = extractive_result.get("extracted_sentences", [])
@@ -659,8 +658,8 @@ async def summarize_hybrid_phobert_paraphrase(
                 detail="No sentences could be extracted from the input text"
             )
         
-        # NOTE: PhoBERT's summarize_by_ratio already returns sentences sorted by position
-        # No manual sorting needed!
+        # NOTE: Segmentation already returns sentences sorted by position
+        # Coverage: Intro (2) + Body (5) + Conclusion (2) = Even distribution!
         
         # ========== STEP 2 & 3: CHUNKING + PARAPHRASING ==========
         # ViT5 Paraphrase will handle chunking (3 sentences) and paraphrasing

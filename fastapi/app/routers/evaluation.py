@@ -208,15 +208,14 @@ async def generate_summary(model_name: str, text: str, max_length: int = 150) ->
             return extractive_result.get("summary", "")
     
     elif model_name == "hybrid_paraphrase":
-        # PhoBERT (extractive) + ViT5 Paraphrase (smooth with chunking) - NEW!
+        # PhoBERT (segmentation extraction) + ViT5 Paraphrase (smooth with chunking) - NEW!
         extractive_service, vit5_paraphrase_service = services
         
-        # Stage 1: PhoBERT extractive
-        extractive_result = extractive_service.summarize_by_ratio(
+        # Stage 1: PhoBERT segmentation (2-5-2 distribution)
+        extractive_result = extractive_service.extract_with_segmentation(
             text=text,
-            ratio=0.6,  # 60% extraction
-            min_sentences=5,
-            max_sentences=8
+            quotas={"intro": 2, "body": 5, "conclusion": 2},
+            total_sentences=9
         )
         extracted_sentences = extractive_result.get("extracted_sentences", [])
         

@@ -698,16 +698,170 @@ class ExtractiveSummarizationService:
         
         # Join with connectors and postprocess
         summary = self._join_with_connectors(extracted)
-        summary = self._postprocess_summary(summary)
+        summary_final = self._postprocess_summary(summary)
         
         return {
-            "summary": summary,
+            "summary": summary_final,
             "extracted_sentences": extracted,
             "num_sentences_extracted": len(extracted),
             "total_sentences": total_sentences,
-            "calculated_k": calculated_k,
             "ratio_applied": ratio,
             "method": "extractive_by_ratio",
+            "hallucination_risk": "ZERO"
+        }
+    
+    def extract_with_segmentation(
+        self,
+        text: str,
+        quotas: dict = None,
+        total_sentences: int = 9
+    ) -> dict:
+        """
+        Extract sentences with SEGMENTATION strategy to fix LEAD-BIAS.
+        
+        WHY THIS METHOD:
+        - PhoBERT tends to extract sentences from intro/conclusion, missing body
+        - This causes LOW BERTScore (~0.73) due to missing semantic coverage
+        - Segmentation FORCES extraction from intro, body, AND conclusion
+        
+        STRATEGY (2-5-2 Distribution):
+        - Intro (20%): Extract 2 sentences → Opening context
+        - Body (60%): Extract 5 sentences → CRITICAL DETAILS (AlphaFold, Robots, etc.)
+        - Conclusion (20%): Extract 2 sentences → Summary & challenges
+        
+        Total: 9 sentences (divisible by chunk_size=3 for ViT5!)
+        
+        Args:
+            text: Input text to summarize
+            quotas: Custom quotas (default: {"intro": 2, "body": 5, "conclusion": 2})
+            total_sentences: Total sentences to extract (default 9)
+            
+        Returns:
+            Dict with extracted sentences and metadata
+        """
+        self._load_model()
+        
+        # Default quotas: 2-5-2 distribution
+        if quotas is None:
+            quotas = {"intro": 2, "body": 5, "conclusion": 2}
+        
+        # Preprocess
+        text = self._preprocess_text(text)
+        
+        # Split into sentences
+        all_sentences = self._split_sentences(text)
+        n = len(all_sentences)
+        
+        if n == 0:
+            return {
+                "summary": "",
+                "extracted_sentences": [],
+                "num_sentences_extracted": 0,
+                "total_sentences": 0,
+                "method": "extractive_segmentation",
+                "hallucination_risk": "ZERO"
+            }
+        
+        # If text is very short, fallback to normal extraction
+        if n <= total_sentences:
+            scores = self._compute_sentence_scores(all_sentences)
+            selected_indices = self._select_with_mmr(
+                sentences=all_sentences,
+                scores=scores,
+                k=min(n, total_sentences),
+                lambda_param=0.4
+            )
+            selected_indices.sort()
+            extracted = [all_sentences[idx] for idx in selected_indices]
+            summary = self._join_with_connectors(extracted)
+            
+            return {
+                "summary": summary,
+                "extracted_sentences": extracted,
+                "num_sentences_extracted": len(extracted),
+                "total_sentences": n,
+                "method": "extractive_segmentation (fallback)",
+                "hallucination_risk": "ZERO"
+            }
+        
+        # ========== SEGMENTATION STRATEGY ==========
+        # Define boundaries (20% intro, 60% body, 20% conclusion)
+        limit_intro = max(1, int(n * 0.2))  # At least 1 sentence
+        limit_body_end = min(n - 1, int(n * 0.8))  # Leave at least 1 for conclusion
+        
+        # Segment the text
+        part_intro = all_sentences[:limit_intro]
+        part_body = all_sentences[limit_intro:limit_body_end]
+        part_conclusion = all_sentences[limit_body_end:]
+        
+        logger.info(f"📊 Segmentation: Intro={len(part_intro)}, Body={len(part_body)}, Conclusion={len(part_conclusion)}")
+        
+        # Adjust quotas if segments are too small
+        q_intro = min(quotas["intro"], len(part_intro))
+        q_body = min(quotas["body"], len(part_body))
+        q_conclusion = min(quotas["conclusion"], len(part_conclusion))
+        
+        # Extract from each segment
+        selected_intro_indices = []
+        selected_body_indices = []
+        selected_conclusion_indices = []
+        
+        # Intro segment
+        if q_intro > 0 and len(part_intro) > 0:
+            scores_intro = self._compute_sentence_scores(part_intro)
+            intro_indices = self._select_with_mmr(
+                sentences=part_intro,
+                scores=scores_intro,
+                k=q_intro,
+                lambda_param=0.4
+            )
+            # Convert to global indices
+            selected_intro_indices = intro_indices
+        
+        # Body segment (MOST IMPORTANT for BERTScore!)
+        if q_body > 0 and len(part_body) > 0:
+            scores_body = self._compute_sentence_scores(part_body)
+            body_indices = self._select_with_mmr(
+                sentences=part_body,
+                scores=scores_body,
+                k=q_body,
+                lambda_param=0.4
+            )
+            # Convert to global indices
+            selected_body_indices = [idx + limit_intro for idx in body_indices]
+        
+        # Conclusion segment
+        if q_conclusion > 0 and len(part_conclusion) > 0:
+            scores_conclusion = self._compute_sentence_scores(part_conclusion)
+            conclusion_indices = self._select_with_mmr(
+                sentences=part_conclusion,
+                scores=scores_conclusion,
+                k=q_conclusion,
+                lambda_param=0.4
+            )
+            # Convert to global indices
+            selected_conclusion_indices = [idx + limit_body_end for idx in conclusion_indices]
+        
+        # Combine all indices and sort by position
+        all_selected_indices = selected_intro_indices + selected_body_indices + selected_conclusion_indices
+        all_selected_indices.sort()
+        
+        # Extract sentences
+        extracted = [all_sentences[idx] for idx in all_selected_indices]
+        
+        # Join with connectors and postprocess
+        summary = self._join_with_connectors(extracted)
+        summary_final = self._postprocess_summary(summary)
+        
+        logger.info(f"✅ Segmentation extracted: {len(extracted)} sentences (Intro:{q_intro}, Body:{q_body}, Conclusion:{q_conclusion})")
+        
+        return {
+            "summary": summary_final,
+            "extracted_sentences": extracted,
+            "num_sentences_extracted": len(extracted),
+            "total_sentences": n,
+            "quotas_used": {"intro": q_intro, "body": q_body, "conclusion": q_conclusion},
+            "method": "extractive_segmentation",
             "hallucination_risk": "ZERO",
             "original_length": len(text),
             "summary_length": len(summary),
