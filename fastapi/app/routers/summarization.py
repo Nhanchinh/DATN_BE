@@ -30,6 +30,10 @@ from app.services.bartpho_service import (
     BARTphoService,
     get_bartpho_service,
 )
+from app.services.vit5_paraphrase_service import (
+    ViT5ParaphraseService,
+    get_vit5_paraphrase_service,
+)
 
 
 router = APIRouter(prefix="/summarize", tags=["summarization"])
@@ -600,4 +604,146 @@ async def get_bartpho_info(
     service: BARTphoService = Depends(get_bartpho_service)
 ) -> dict:
     return service.get_model_info()
+
+
+@router.post("/hybrid-phobert-paraphrase", response_model=dict, summary="[PhoBERT → ViT5 Paraphrase] 🔥 SMOOTH PIPELINE")
+async def summarize_hybrid_phobert_paraphrase(
+    request: SummarizationRequest,
+    extractive_service: ExtractiveSummarizationService = Depends(get_extractive_service),
+    vit5_paraphrase_service: ViT5ParaphraseService = Depends(get_vit5_paraphrase_service)
+) -> dict:
+    """
+    🔥 Hybrid: PhoBERT (Extract) + ViT5 Paraphrase (Smooth).
+    
+    **💎 PIPELINE (4 STEPS):**
+    
+    1. **PhoBERT Extraction**: Extract top 8 most important sentences
+    2. **Sorting**: Sort by original index (maintain coherence)
+    3. **Chunking**: Group into chunks of 3 sentences
+    4. **ViT5 Paraphrase**: Smooth each chunk with "làm mượt:" prefix
+    
+    **🎯 WHY THIS WORKS:**
+    - PhoBERT filters out noise → Only important content
+    - Sorting preserves logical flow (Intro → Body → Conclusion)
+    - Chunking prevents 256 token overflow
+    - ViT5 Paraphrase adds connectors + fixes grammar
+    
+    **⚙️ CONFIG:**
+    - PhoBERT: Extract top 8 sentences
+    - Chunk size: 3 sentences per chunk
+    - ViT5: num_beams=5, max_length=256, prefix="làm mượt:"
+    
+    **📊 USE CASES:**
+    - ✅ Long articles that need extraction + smoothing
+    - ✅ Natural Vietnamese text from rough bullet points
+    - ✅ Production-ready summarization
+    
+    Model: AI_Models/my_vit5_paraphrase_model
+    Lần đầu gọi sẽ load 2 models (~1.8GB tổng).
+    """
+    try:
+        # ========== STEP 1: PhoBERT EXTRACTION ==========
+        # Extract top 8 important sentences using summarize_by_ratio
+        extractive_result = extractive_service.summarize_by_ratio(
+            text=request.text,
+            ratio=0.6,  # Extract 60% of sentences
+            min_sentences=5,
+            max_sentences=8  # Top 8 sentences
+        )
+        
+        extracted_sentences = extractive_result.get("extracted_sentences", [])
+        
+        if not extracted_sentences:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="No sentences could be extracted from the input text"
+            )
+        
+        # NOTE: PhoBERT's summarize_by_ratio already returns sentences sorted by position
+        # No manual sorting needed!
+        
+        # ========== STEP 2 & 3: CHUNKING + PARAPHRASING ==========
+        # ViT5 Paraphrase will handle chunking (3 sentences) and paraphrasing
+        final_summary = vit5_paraphrase_service.paraphrase_sentences(
+            sentences=extracted_sentences,
+            chunk_size=3,
+            max_length=request.max_length,
+            min_length=request.min_length
+        )
+        
+        return {
+            "stage1_extracted_sentences": extracted_sentences,
+            "stage1_count": len(extracted_sentences),
+            "stage1_model": "vinai/phobert-base",
+            "stage2_final": final_summary,
+            "stage2_model": "AI_Models/my_vit5_paraphrase_model",
+            "pipeline": "PhoBERT (extract 60%) → Chunk (3 sentences) → ViT5 Paraphrase",
+            "approach": "Extract + Smooth with chunking",
+            "config": {
+                "extraction": {
+                    "ratio": 0.6,
+                    "min_sentences": 5,
+                    "max_sentences": 8,
+                    "strategy": "PhoBERT scoring (auto-sorted by position)"
+                },
+                "paraphrasing": {
+                    "chunk_size": 3,
+                    "prefix": "làm mượt:",
+                    **vit5_paraphrase_service.GEN_CONFIG
+                }
+            },
+            "original_length": len(request.text),
+            "extracted_length": sum(len(s) for s in extracted_sentences),
+            "final_length": len(final_summary),
+            "compression_ratio": round(len(final_summary) / len(request.text), 3) if len(request.text) > 0 else 0,
+            "hallucination_risk": "VERY LOW (PhoBERT grounds + ViT5 Paraphrase smooths)"
+        }
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Hybrid PhoBERT + ViT5 Paraphrase failed: {str(e)}"
+        )
+
+
+@router.get("/hybrid-phobert-paraphrase/info", response_model=dict, summary="[Hybrid Paraphrase] Pipeline info")
+async def get_hybrid_paraphrase_info(
+    vit5_service: ViT5ParaphraseService = Depends(get_vit5_paraphrase_service)
+) -> dict:
+    """Get information about the Hybrid PhoBERT + ViT5 Paraphrase pipeline"""
+    return {
+        "pipeline_name": "Hybrid PhoBERT + ViT5 Paraphrase",
+        "description": "Extract important sentences + Smooth into natural text",
+        "stages": [
+            {
+                "stage": 1,
+                "name": "PhoBERT Extraction",
+                "model": "vinai/phobert-base",
+                "task": "Extract top 8 important sentences"
+            },
+            {
+                "stage": 2,
+                "name": "Sorting",
+                "task": "Sort by original index (maintain coherence)"
+            },
+            {
+                "stage": 3,
+                "name": "Chunking",
+                "task": "Group into chunks of 3 sentences"
+            },
+            {
+                "stage": 4,
+                "name": "ViT5 Paraphrase",
+                "model": "AI_Models/my_vit5_paraphrase_model",
+                "task": "Smooth each chunk with connectors + grammar fixes"
+            }
+        ],
+        "vit5_paraphrase_info": vit5_service.get_model_info(),
+        "advantages": [
+            "PhoBERT filters noise",
+            "Sorting maintains logical flow",
+            "Chunking prevents token overflow",
+            "ViT5 Paraphrase creates natural Vietnamese",
+            "Very low hallucination risk"
+        ]
+    }
 

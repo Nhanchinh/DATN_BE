@@ -34,6 +34,7 @@ from app.services.extractive_service import get_extractive_service
 from app.services.multilingual_service import get_multilingual_service
 from app.services.bartpho_service import get_bartpho_service
 from app.services.hybrid_service import get_hybrid_service
+from app.services.vit5_paraphrase_service import get_vit5_paraphrase_service
 
 logger = logging.getLogger(__name__)
 
@@ -52,6 +53,7 @@ def get_summarization_service(model_name: str):
     - hybrid: PhoBERT + mT5-XLSum
     - hybrid_bartpho: PhoBERT + BARTpho (VinAI ecosystem)
     - hybrid_vit5: PhoBERT + ViT5 Local ⭐ BEST!
+    - hybrid_paraphrase: PhoBERT + ViT5 Paraphrase 🔥 NEW! (Smooth)
     """
     model_map = {
         "extractive": get_extractive_service(),
@@ -63,6 +65,7 @@ def get_summarization_service(model_name: str):
         "hybrid": get_hybrid_service(),
         "hybrid_bartpho": (get_extractive_service(), get_bartpho_service()),
         "hybrid_vit5": (get_extractive_service(), get_multilingual_service()),
+        "hybrid_paraphrase": (get_extractive_service(), get_vit5_paraphrase_service()),  # NEW!
     }
     
     service = model_map.get(model_name)
@@ -199,6 +202,31 @@ async def generate_summary(model_name: str, text: str, max_length: int = 150) ->
                 text=combined_text,
                 max_length=max_length,
                 min_length=30
+            )
+            return final_summary
+        else:
+            return extractive_result.get("summary", "")
+    
+    elif model_name == "hybrid_paraphrase":
+        # PhoBERT (extractive) + ViT5 Paraphrase (smooth with chunking) - NEW!
+        extractive_service, vit5_paraphrase_service = services
+        
+        # Stage 1: PhoBERT extractive
+        extractive_result = extractive_service.summarize_by_ratio(
+            text=text,
+            ratio=0.6,  # 60% extraction
+            min_sentences=5,
+            max_sentences=8
+        )
+        extracted_sentences = extractive_result.get("extracted_sentences", [])
+        
+        # Stage 2: ViT5 Paraphrase with chunking (3 sentences per chunk)
+        if extracted_sentences:
+            final_summary = vit5_paraphrase_service.paraphrase_sentences(
+                sentences=extracted_sentences,
+                chunk_size=3,
+                max_length=max_length,
+                min_length=20
             )
             return final_summary
         else:
