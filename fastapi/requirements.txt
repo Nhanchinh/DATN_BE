@@ -12,6 +12,7 @@ python-dotenv>=1.0.0
 # Authentication & Security
 python-jose[cryptography]>=3.3.0
 passlib[bcrypt]>=1.7.4
+bcrypt==3.2.2  # Fix compatibility with passlib
 
 # Validation
 pydantic[email]>=2.0.0
@@ -24,3 +25,12 @@ sentencepiece>=0.1.99
 protobuf>=4.0.0
 bert-extractive-summarizer>=0.10.1
 scikit-learn>=1.0.0
+
+# Evaluation Metrics
+evaluate>=0.4.0
+bert-score>=0.3.13
+pyvi>=0.1.1
+datasets>=2.14.0
+rouge-score>=0.1.2
+absl-py>=1.0.0
+nltk>=3.8
