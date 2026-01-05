@@ -1,0 +1,111 @@
+"""
+VietNews Summarization Service
+Model: vinai/vit5-base-vietnews-summarization (Official VinAI model)
+Ideal for: Vietnamese news summarization
+"""
+
+import logging
+import torch
+from transformers import AutoModelForSeq2SeqLM, AutoTokenizer
+from typing import Optional, Tuple
+
+logger = logging.getLogger(__name__)
+
+
+class VietNewsService:
+    """
+    Summarization using vinai/vit5-base-vietnews-summarization.
+    This model is pre-trained by VinAI specifically for Vietnamese news summarization.
+    """
+    
+    MODEL_NAME = "VietAI/vit5-base-vietnews-summarization"
+    
+    def __init__(self):
+        self._model = None
+        self._tokenizer = None
+        self._device = "cuda" if torch.cuda.is_available() else "cpu"
+        
+        logger.info(f"VietNewsService initialized. Device: {self._device}")
+    
+    def _load_model(self) -> None:
+        """Lazy load VietNews model"""
+        if self._model is None:
+            logger.info(f"Loading {self.MODEL_NAME}... (this may take 1-2 minutes)")
+            self._tokenizer = AutoTokenizer.from_pretrained(self.MODEL_NAME)
+            self._model = AutoModelForSeq2SeqLM.from_pretrained(self.MODEL_NAME)
+            self._model.to(self._device)
+            self._model.eval()
+            logger.info(f"{self.MODEL_NAME} loaded successfully!")
+    
+    def summarize(
+        self,
+        text: str,
+        max_length: int = 256,
+        min_length: int = 40
+    ) -> Tuple[str, str]:
+        """
+        Summarize text using VietNews model.
+        
+        Args:
+            text: Input news text
+            max_length: Max summary length
+            min_length: Min summary length
+            
+        Returns:
+            Tuple[str, str]: (raw_summary, processed_summary)
+        """
+        self._load_model()
+        
+        # VietNews model expects "vietnews: " prefix + text
+        # Adding explicit prompt as requested to improve context understanding
+        input_text = "vietnews: " + text
+        
+        inputs = self._tokenizer(
+            input_text,
+            return_tensors="pt",
+            max_length=1024,
+            truncation=True,
+            padding="max_length"
+        ).to(self._device)
+        
+        with torch.no_grad():
+            outputs = self._model.generate(
+                inputs["input_ids"],
+                attention_mask=inputs["attention_mask"],
+                max_length=max_length,
+                min_length=min_length,
+                do_sample=False,           # Tắt sáng tạo
+                num_beams=5,               # Ép tìm ý chính
+                no_repeat_ngram_size=3,
+                repetition_penalty=3.0,    # Phạt nặng việc lặp từ
+                length_penalty=2.0,        # Khuyến khích viết dài và tổng hợp ý
+                early_stopping=True
+            )
+        
+        summary = self._tokenizer.decode(outputs[0], skip_special_tokens=True)
+        
+        # Simple processing
+        processed_summary = summary.replace(" .", ".").strip()
+        
+        return summary, processed_summary
+    
+    def get_model_info(self) -> dict:
+        return {
+            "model_name": self.MODEL_NAME,
+            "description": "Official VinAI ViT5 model trained on VietNews dataset",
+            "type": "Abstractive Summarization",
+            "domain": "News",
+            "model_size": "~900MB",
+            "loaded": self._model is not None
+        }
+
+
+# Singleton
+_vietnews_service: Optional[VietNewsService] = None
+
+
+def get_vietnews_service() -> VietNewsService:
+    global _vietnews_service
+    if _vietnews_service is None:
+        _vietnews_service = VietNewsService()
+    return _vietnews_service
