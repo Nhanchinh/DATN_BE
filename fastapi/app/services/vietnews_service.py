@@ -1,6 +1,6 @@
 """
 VietNews Summarization Service
-Model: vinai/vit5-base-vietnews-summarization (Official VinAI model)
+Model: Local finetuned ViT5 model (my_vit5_model_finetune10k)
 Ideal for: Vietnamese news summarization
 """
 
@@ -14,11 +14,11 @@ logger = logging.getLogger(__name__)
 
 class VietNewsService:
     """
-    Summarization using vinai/vit5-base-vietnews-summarization.
-    This model is pre-trained by VinAI specifically for Vietnamese news summarization.
+    Summarization using local finetuned ViT5 model.
+    This model is finetuned on 10k samples for Vietnamese news summarization.
     """
     
-    MODEL_NAME = "VietAI/vit5-base-vietnews-summarization"
+    MODEL_NAME = "AI_Models/my_vit5_model_finetune10k"
     
     def __init__(self):
         self._model = None
@@ -68,18 +68,17 @@ class VietNewsService:
             padding="max_length"
         ).to(self._device)
         
-        with torch.no_grad():
+        with torch.inference_mode():
             outputs = self._model.generate(
                 inputs["input_ids"],
                 attention_mask=inputs["attention_mask"],
-                max_length=max_length,
+                max_length=150,
                 min_length=min_length,
-                do_sample=False,           # Tắt sáng tạo
-                num_beams=5,               # Ép tìm ý chính
+                num_beams=5,               # Mức cân bằng: không chậm như 5, không ngáo như 1-2
+                early_stopping=True,
                 no_repeat_ngram_size=3,
-                repetition_penalty=3.0,    # Phạt nặng việc lặp từ
-                length_penalty=2.0,        # Khuyến khích viết dài và tổng hợp ý
-                early_stopping=True
+                repetition_penalty=2.5,    # Giữ mức này để tránh lặp nhưng không làm gãy câu
+                length_penalty=1.2         # Khuyến khích model nối ý nhưng không quá dài
             )
         
         summary = self._tokenizer.decode(outputs[0], skip_special_tokens=True)
@@ -92,7 +91,7 @@ class VietNewsService:
     def get_model_info(self) -> dict:
         return {
             "model_name": self.MODEL_NAME,
-            "description": "Official VinAI ViT5 model trained on VietNews dataset",
+            "description": "Local finetuned ViT5 model trained on 10k samples for Vietnamese news summarization",
             "type": "Abstractive Summarization",
             "domain": "News",
             "model_size": "~900MB",
