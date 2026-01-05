@@ -10,6 +10,7 @@ _pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 JWT_SECRET_KEY = os.getenv("JWT_SECRET_KEY", "change-me")
 JWT_ALGORITHM = os.getenv("JWT_ALGORITHM", "HS256")
 JWT_EXPIRES_MINUTES = int(os.getenv("JWT_EXPIRES_MINUTES", "60"))
+JWT_REFRESH_EXPIRES_DAYS = int(os.getenv("JWT_REFRESH_EXPIRES_DAYS", "7"))
 
 
 def hash_password(password: str) -> str:
@@ -45,3 +46,26 @@ def get_user_id_from_token(token: str) -> str:
     return payload.get("sub")
 
 
+def create_refresh_token(subject: str, expires_delta: Optional[timedelta] = None) -> str:
+    """Tạo refresh token với thời hạn dài hơn (mặc định 7 ngày)"""
+    if expires_delta is None:
+        expires_delta = timedelta(days=JWT_REFRESH_EXPIRES_DAYS)
+    expire = datetime.now(timezone.utc) + expires_delta
+    to_encode: Dict[str, Any] = {
+        "sub": subject, 
+        "exp": int(expire.timestamp()),
+        "type": "refresh"  # Đánh dấu đây là refresh token
+    }
+    return jwt.encode(to_encode, JWT_SECRET_KEY, algorithm=JWT_ALGORITHM)
+
+
+def decode_refresh_token(token: str) -> Dict[str, Any]:
+    """Decode và validate refresh token"""
+    try:
+        payload = jwt.decode(token, JWT_SECRET_KEY, algorithms=[JWT_ALGORITHM])
+        # Kiểm tra đây có phải refresh token không
+        if payload.get("type") != "refresh":
+            raise ValueError("Invalid token type - expected refresh token")
+        return payload
+    except JWTError as exc:
+        raise ValueError("Invalid refresh token") from exc

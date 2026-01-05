@@ -32,9 +32,11 @@ class UserPublic(UserBase):
 
 
 class Token(BaseModel):
-
+    """Token response with access_token, refresh_token and user info"""
     access_token: str
+    refresh_token: str
     token_type: str = "bearer"
+    user: "UserPublic"
 
 
 class TokenPayload(BaseModel):
@@ -43,3 +45,12 @@ class TokenPayload(BaseModel):
     exp: int
 
 
+class LoginRequest(BaseModel):
+    """JSON login request body"""
+    email: EmailStr
+    password: str = Field(min_length=6)
+
+
+class RefreshTokenRequest(BaseModel):
+    """Request body for token refresh"""
+    refresh_token: str
